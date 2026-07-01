@@ -18,6 +18,7 @@ type ControlPanelProps = {
   message: string
   visualStyle: VisualStyle
   cameraQuality: CameraQuality
+  synthVolume: number
   particleControls: ParticleControls
   debug: DebugMetrics
   emotion: AudioEmotion
@@ -25,6 +26,7 @@ type ControlPanelProps = {
   onStop: () => void
   onVisualStyleChange: (style: VisualStyle) => void
   onCameraQualityChange: (quality: CameraQuality) => void
+  onSynthVolumeChange: (volume: number) => void
   onParticleControlsChange: (controls: ParticleControls) => void
 }
 
@@ -42,6 +44,7 @@ export function ControlPanel({
   message,
   visualStyle,
   cameraQuality,
+  synthVolume,
   particleControls,
   debug,
   emotion,
@@ -49,6 +52,7 @@ export function ControlPanel({
   onStop,
   onVisualStyleChange,
   onCameraQualityChange,
+  onSynthVolumeChange,
   onParticleControlsChange,
 }: ControlPanelProps) {
   const starting = status === 'starting'
@@ -112,6 +116,23 @@ export function ControlPanel({
       <section className="control-block">
         <h2>Interaction</h2>
         <InteractionStatusPanel debug={debug} />
+      </section>
+
+      <section className="control-block">
+        <h2>声音</h2>
+        <label className="slider-field">
+          <span>
+            和声音量 <b>{Math.round(synthVolume * 100)}%</b>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={Math.round(synthVolume * 100)}
+            onChange={(event) => onSynthVolumeChange(Number(event.currentTarget.value) / 100)}
+          />
+        </label>
       </section>
 
       <section className="control-block particle-block">

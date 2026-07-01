@@ -50,6 +50,8 @@ const initialDebug: DebugMetrics = {
   fps: 0,
 }
 
+const DEFAULT_SYNTH_VOLUME = 0.72
+
 export function RealtimeMode() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const stageRef = useRef<StageCanvasHandle | null>(null)
@@ -63,6 +65,7 @@ export function RealtimeMode() {
   const runningRef = useRef(false)
   const visualStyleRef = useRef<VisualStyle>('normal')
   const cameraQualityRef = useRef<CameraQuality>(DEFAULT_CAMERA_QUALITY)
+  const synthVolumeRef = useRef(DEFAULT_SYNTH_VOLUME)
   const particleControlsRef = useRef<ParticleControls>(DEFAULT_PARTICLE_CONTROLS)
   const emotionRef = useRef<AudioEmotion>(createDefaultEmotion())
   const gestureEngineRef = useRef(new GestureEngine())
@@ -77,6 +80,7 @@ export function RealtimeMode() {
   const [message, setMessage] = useState('')
   const [visualStyle, setVisualStyle] = useState<VisualStyle>('normal')
   const [cameraQuality, setCameraQuality] = useState<CameraQuality>(DEFAULT_CAMERA_QUALITY)
+  const [synthVolume, setSynthVolume] = useState(DEFAULT_SYNTH_VOLUME)
   const [particleControls, setParticleControls] = useState<ParticleControls>(
     DEFAULT_PARTICLE_CONTROLS,
   )
@@ -90,6 +94,11 @@ export function RealtimeMode() {
   useEffect(() => {
     cameraQualityRef.current = cameraQuality
   }, [cameraQuality])
+
+  useEffect(() => {
+    synthVolumeRef.current = synthVolume
+    synthRef.current?.setVolume(synthVolume)
+  }, [synthVolume])
 
   useEffect(() => {
     particleControlsRef.current = particleControls
@@ -317,6 +326,7 @@ export function RealtimeMode() {
 
       const audioAnalyser = new MicAudioAnalyser(micStream)
       const synth = new TopologySynthEngine()
+      synth.setVolume(synthVolumeRef.current)
       await audioAnalyser.resume()
       await synth.resume()
 
@@ -365,6 +375,7 @@ export function RealtimeMode() {
         message={message}
         visualStyle={visualStyle}
         cameraQuality={cameraQuality}
+        synthVolume={synthVolume}
         debug={debug}
         emotion={emotion}
         particleControls={particleControls}
@@ -372,6 +383,7 @@ export function RealtimeMode() {
         onStop={stopRealtime}
         onVisualStyleChange={setVisualStyle}
         onCameraQualityChange={setCameraQuality}
+        onSynthVolumeChange={setSynthVolume}
         onParticleControlsChange={setParticleControls}
       />
     </main>

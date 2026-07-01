@@ -2,6 +2,7 @@ import { clamp, lerp } from '../core/math'
 import type { FingerTopology, HarmonyFamily, HarmonyState } from '../core/types'
 
 const BASE_FREQUENCY = 220
+const DEFAULT_SYNTH_VOLUME = 0.72
 
 const CHORD_INTERVALS: Record<HarmonyFamily, number[]> = {
   silent: [],
@@ -30,6 +31,7 @@ export class TopologySynthEngine {
   private readonly noiseGain: GainNode
   private lastPulseAt = -Infinity
   private lastSignature = 'silent:0'
+  private volume = DEFAULT_SYNTH_VOLUME
   private started = false
 
   constructor() {
@@ -85,6 +87,18 @@ export class TopologySynthEngine {
     this.started = true
   }
 
+  setVolume(volume: number) {
+    this.volume = clamp(volume, 0, 1)
+
+    if (this.audioContext.state === 'closed') {
+      return
+    }
+
+    if (this.volume === 0) {
+      this.master.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.025)
+    }
+  }
+
   update(harmony: HarmonyState, topology: FingerTopology, nowMs: number) {
     if (!this.started || this.audioContext.state === 'closed') {
       return
@@ -92,7 +106,7 @@ export class TopologySynthEngine {
 
     const now = this.audioContext.currentTime
     const muted = harmony.muted || topology.muted
-    const targetMaster = muted ? 0 : 0.045 + topology.normalizedArea * 0.035
+    const targetMaster = muted ? 0 : (0.045 + topology.normalizedArea * 0.035) * this.volume
     const intervals = CHORD_INTERVALS[harmony.family]
     const rootOffset = Math.round(lerp(-5, 7, harmony.brightness))
     const detuneSpread = harmony.dissonance * 18
