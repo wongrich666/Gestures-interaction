@@ -1,5 +1,13 @@
-import { distance2D, landmarkDistance, midpoint, normalizeVector } from '../core/math'
-import type { GestureEvent, GestureSnapshot, HandData, Landmark } from '../core/types'
+import { clamp, distance2D, landmarkDistance, midpoint, normalizeVector } from '../core/math'
+import type {
+  GestureEvent,
+  GestureSnapshot,
+  GestureState,
+  HandData,
+  Landmark,
+  Point2D,
+  VisualGesture,
+} from '../core/types'
 import { gestureRules } from './gestureRules'
 import { smoothLandmarks } from './smoothing'
 import {
@@ -15,6 +23,10 @@ export class GestureEngine {
   private previousIndexTip: Landmark | null = null
   private previousTimestamp = 0
   private previousLandmarks: Landmark[] | null = null
+  private stableGesture: VisualGesture = 'none'
+  private pendingGesture: VisualGesture = 'none'
+  private pendingSince = 0
+  private stableStartedAt = 0
   private readonly previousHandMotion = new Map<string, PreviousHandMotion>()
 
   update(targetHand: HandData | null, now: number, hands: HandData[] | number): GestureSnapshot {
@@ -27,13 +39,15 @@ export class GestureEngine {
       this.pinching = false
       this.previousIndexTip = null
       this.previousLandmarks = null
+      const gestureState = this.resolveGestureState('none', 0, null, null, now)
 
       return {
         handCount,
         detected: false,
         handedness: 'None',
         handPose: 'none',
-        visualGesture: 'none',
+        visualGesture: gestureState.id,
+        gestureState,
         effectIntensity: 0,
         pinch: false,
         pinchDistance: 0,
@@ -74,6 +88,14 @@ export class GestureEngine {
       x: indexTip.x - indexMcp.x,
       y: indexTip.y - indexMcp.y,
     })
+    const gestureAnchor = targetState?.palmCenter ?? indexTip
+    const gestureState = this.resolveGestureState(
+      analysis.visualGesture,
+      analysis.effectIntensity,
+      gestureAnchor,
+      indexDirection,
+      now,
+    )
 
     this.previousTimestamp = now
     this.previousIndexTip = indexTip
@@ -83,8 +105,9 @@ export class GestureEngine {
       detected: true,
       handedness: targetHand.handedness,
       handPose: analysis.handPose,
-      visualGesture: analysis.visualGesture,
-      effectIntensity: analysis.effectIntensity,
+      visualGesture: gestureState.id,
+      gestureState,
+      effectIntensity: gestureState.intensity,
       pinch,
       pinchDistance,
       pinchEvent,
@@ -109,6 +132,10 @@ export class GestureEngine {
     this.previousIndexTip = null
     this.previousTimestamp = 0
     this.previousLandmarks = null
+    this.stableGesture = 'none'
+    this.pendingGesture = 'none'
+    this.pendingSince = 0
+    this.stableStartedAt = 0
     this.previousHandMotion.clear()
   }
 
@@ -135,15 +162,65 @@ export class GestureEngine {
 
     return 'none'
   }
+
+  private resolveGestureState(
+    candidate: VisualGesture,
+    intensity: number,
+    anchor: Landmark | null,
+    direction: Point2D | null,
+    now: number,
+  ): GestureState {
+    if (candidate !== this.pendingGesture) {
+      this.pendingGesture = candidate
+      this.pendingSince = now
+    }
+
+    const confirmMs = candidate === 'none' ? 72 : isBurstGesture(candidate) ? 48 : 96
+    const pendingAge = now - this.pendingSince
+    const changed = candidate !== this.stableGesture && pendingAge >= confirmMs
+    let phase: GestureState['phase']
+
+    if (changed) {
+      this.stableGesture = candidate
+      this.stableStartedAt = now
+      phase = candidate === 'none' ? 'exit' : 'enter'
+    } else if (this.stableGesture === 'none') {
+      phase = 'idle'
+    } else {
+      phase = 'hold'
+    }
+
+    const dwell = Math.max(0, now - this.stableStartedAt)
+    const confidence =
+      this.stableGesture === 'none'
+        ? 0
+        : candidate === this.stableGesture
+          ? clamp(0.52 + dwell / 360, 0, 1)
+          : clamp(0.46 - pendingAge / Math.max(1, confirmMs) * 0.28, 0.18, 0.46)
+
+    return {
+      id: this.stableGesture,
+      phase,
+      confidence,
+      intensity: this.stableGesture === 'none' ? 0 : clamp(intensity * (0.72 + confidence * 0.38), 0, 1),
+      anchor,
+      direction,
+      startedAt: this.stableStartedAt,
+      updatedAt: now,
+    }
+  }
 }
 
 export function emptyGestureSnapshot(): GestureSnapshot {
+  const gestureState = createEmptyGestureState()
+
   return {
     handCount: 0,
     detected: false,
     handedness: 'None',
     handPose: 'none',
     visualGesture: 'none',
+    gestureState,
     effectIntensity: 0,
     pinch: false,
     pinchDistance: 0,
@@ -161,6 +238,30 @@ export function emptyGestureSnapshot(): GestureSnapshot {
     indexDirection: null,
     indexVelocity: 0,
   }
+}
+
+function createEmptyGestureState(): GestureState {
+  return {
+    id: 'none',
+    phase: 'idle',
+    confidence: 0,
+    intensity: 0,
+    anchor: null,
+    direction: null,
+    startedAt: 0,
+    updatedAt: 0,
+  }
+}
+
+function isBurstGesture(gesture: VisualGesture) {
+  return (
+    gesture === 'finger_gun' ||
+    gesture === 'punch' ||
+    gesture === 'clap' ||
+    gesture === 'push' ||
+    gesture === 'two_hand_heart' ||
+    gesture === 'finger_heart'
+  )
 }
 
 function resolveTwoHandDistance(handStates: GestureSnapshot['handStates']) {

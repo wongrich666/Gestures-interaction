@@ -341,6 +341,12 @@
   gap: 8px;
 }
 
+.quality-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .style-button {
   min-width: 0;
   padding: 9px 8px;
@@ -354,6 +360,15 @@
   color: #041115;
   background: linear-gradient(135deg, #5ee4ff, #ffe66f);
   border-color: rgba(255, 255, 255, 0.32);
+}
+
+.style-button:disabled {
+  color: rgba(220, 231, 227, 0.42);
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.08);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .interaction-status {
@@ -390,7 +405,7 @@
 
 .metric-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 

@@ -21,6 +21,14 @@ export function DebugPanel({ debug }: DebugPanelProps) {
         <dd>{debug.visualGesture ?? 'none'}</dd>
       </div>
       <div>
+        <dt>Phase</dt>
+        <dd>{debug.gesturePhase ?? 'idle'}</dd>
+      </div>
+      <div>
+        <dt>Stable</dt>
+        <dd>{formatNumber(debug.gestureConfidence ?? 0)}</dd>
+      </div>
+      <div>
         <dt>Pinch</dt>
         <dd>{debug.pinch ? 'true' : 'false'}</dd>
       </div>
@@ -43,6 +51,14 @@ export function DebugPanel({ debug }: DebugPanelProps) {
       <div>
         <dt>Harmony</dt>
         <dd>{debug.harmonyLabel ?? 'silent'}</dd>
+      </div>
+      <div>
+        <dt>Face</dt>
+        <dd>{debug.faceIntent ?? 'none'}</dd>
+      </div>
+      <div>
+        <dt>Mouth</dt>
+        <dd>{formatNumber(debug.mouthOpen ?? 0)}</dd>
       </div>
       <div>
         <dt>Volume</dt>

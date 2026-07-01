@@ -1,10 +1,30 @@
-import type { AudioFeatures, ParticleControls, ParticlePreset, VisualStyle } from './types'
+import type {
+  AudioFeatures,
+  CameraQuality,
+  ParticleControls,
+  ParticlePreset,
+  VisualStyle,
+} from './types'
 
 export const MEDIAPIPE_WASM_PATH =
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm'
 
 export const HAND_LANDMARKER_MODEL =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task'
+
+export const FACE_LANDMARKER_MODEL =
+  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task'
+
+export const DEFAULT_CAMERA_QUALITY: CameraQuality = 'medium'
+
+export const CAMERA_QUALITY_PRESETS: Record<
+  CameraQuality,
+  { label: string; width: number; height: number; frameRate: number }
+> = {
+  low: { label: 'Low', width: 640, height: 360, frameRate: 24 },
+  medium: { label: 'Medium', width: 960, height: 540, frameRate: 30 },
+  high: { label: 'High', width: 1280, height: 720, frameRate: 30 },
+}
 
 export const PINCH_THRESHOLD = 0.055
 export const PINCH_DEBOUNCE_MS = 250

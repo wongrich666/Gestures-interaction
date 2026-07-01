@@ -1,14 +1,19 @@
-export async function requestCameraStream() {
+import { CAMERA_QUALITY_PRESETS, DEFAULT_CAMERA_QUALITY } from '../core/config'
+import type { CameraQuality } from '../core/types'
+
+export async function requestCameraStream(quality: CameraQuality = DEFAULT_CAMERA_QUALITY) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('当前浏览器不支持摄像头访问。')
   }
 
+  const preset = CAMERA_QUALITY_PRESETS[quality]
+
   return navigator.mediaDevices.getUserMedia({
     video: {
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      width: { ideal: preset.width },
+      height: { ideal: preset.height },
       facingMode: 'user',
-      frameRate: { ideal: 30, max: 60 },
+      frameRate: { ideal: preset.frameRate, max: preset.frameRate },
     },
     audio: false,
   })

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createDefaultEmotion, inferAudioEmotion } from '../audio/audioEmotion'
 import { TopologySynthEngine } from '../audio/synthEngine'
-import { DEFAULT_PARTICLE_CONTROLS, EMPTY_AUDIO_FEATURES } from '../core/config'
+import {
+  DEFAULT_CAMERA_QUALITY,
+  DEFAULT_PARTICLE_CONTROLS,
+  EMPTY_AUDIO_FEATURES,
+} from '../core/config'
 import type {
   AudioEmotion,
   AudioFeatures,
+  CameraQuality,
   DebugMetrics,
+  FaceData,
+  FaceIntent,
   HandData,
   ParticleControls,
   RuntimeStatus,
@@ -14,8 +21,10 @@ import type {
 import { MicAudioAnalyser } from '../audio/audioAnalyser'
 import { requestCameraStream, stopMediaStream, waitForVideoReady } from '../input/cameraInput'
 import { requestMicStream } from '../input/micInput'
+import { analyzeFaceIntent } from '../interaction/faceIntentEngine'
 import { emptyGestureSnapshot, GestureEngine } from '../interaction/gestureEngine'
 import { HandTracker } from '../vision/handTracker'
+import { FaceTracker } from '../vision/faceTracker'
 import { StageCanvas, type StageCanvasHandle } from '../render/StageCanvas'
 import { ControlPanel } from '../ui/ControlPanel'
 
@@ -30,6 +39,10 @@ const initialDebug: DebugMetrics = {
   topologyArea: 0,
   topologyCrossings: 0,
   harmonyLabel: '静音',
+  gesturePhase: 'idle',
+  gestureConfidence: 0,
+  faceIntent: 'none',
+  mouthOpen: 0,
   particleSpread: DEFAULT_PARTICLE_CONTROLS.spread,
   volume: 0,
   bass: 0,
@@ -40,6 +53,7 @@ export function RealtimeMode() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const stageRef = useRef<StageCanvasHandle | null>(null)
   const trackerRef = useRef<HandTracker | null>(null)
+  const faceTrackerRef = useRef<FaceTracker | null>(null)
   const audioAnalyserRef = useRef<MicAudioAnalyser | null>(null)
   const synthRef = useRef<TopologySynthEngine | null>(null)
   const cameraStreamRef = useRef<MediaStream | null>(null)
@@ -47,17 +61,21 @@ export function RealtimeMode() {
   const animationFrameRef = useRef<number | null>(null)
   const runningRef = useRef(false)
   const visualStyleRef = useRef<VisualStyle>('normal')
+  const cameraQualityRef = useRef<CameraQuality>(DEFAULT_CAMERA_QUALITY)
   const particleControlsRef = useRef<ParticleControls>(DEFAULT_PARTICLE_CONTROLS)
   const emotionRef = useRef<AudioEmotion>(createDefaultEmotion())
   const gestureEngineRef = useRef(new GestureEngine())
   const debugTickRef = useRef({ lastUpdate: 0, lastFpsTime: 0, frames: 0, fps: 0 })
   const lastVisionErrorRef = useRef(0)
   const visionTickRef = useRef({ lastDetect: 0, hands: [] as HandData[] })
+  const faceTickRef = useRef({ lastDetect: 0, face: null as FaceData | null })
+  const faceIntentRef = useRef<FaceIntent>({ kind: 'none', intensity: 0, anchor: null })
 
   const [running, setRunning] = useState(false)
   const [status, setStatus] = useState<RuntimeStatus>('idle')
   const [message, setMessage] = useState('')
   const [visualStyle, setVisualStyle] = useState<VisualStyle>('normal')
+  const [cameraQuality, setCameraQuality] = useState<CameraQuality>(DEFAULT_CAMERA_QUALITY)
   const [particleControls, setParticleControls] = useState<ParticleControls>(
     DEFAULT_PARTICLE_CONTROLS,
   )
@@ -67,6 +85,10 @@ export function RealtimeMode() {
   useEffect(() => {
     visualStyleRef.current = visualStyle
   }, [visualStyle])
+
+  useEffect(() => {
+    cameraQualityRef.current = cameraQuality
+  }, [cameraQuality])
 
   useEffect(() => {
     particleControlsRef.current = particleControls
@@ -80,6 +102,8 @@ export function RealtimeMode() {
 
     trackerRef.current?.close()
     trackerRef.current = null
+    faceTrackerRef.current?.close()
+    faceTrackerRef.current = null
     audioAnalyserRef.current?.close()
     audioAnalyserRef.current = null
     synthRef.current?.close()
@@ -101,6 +125,8 @@ export function RealtimeMode() {
     gestureEngineRef.current.reset()
     stageRef.current?.reset()
     emotionRef.current = createDefaultEmotion()
+    faceTickRef.current = { lastDetect: 0, face: null }
+    faceIntentRef.current = { kind: 'none', intensity: 0, anchor: null }
     setEmotion(emotionRef.current)
     setRunning(false)
     setStatus('stopped')
@@ -115,6 +141,8 @@ export function RealtimeMode() {
       audio: AudioFeatures,
       nextEmotion: AudioEmotion,
       gesture: ReturnType<GestureEngine['update']>,
+      face: FaceData | null,
+      faceIntent: FaceIntent,
     ) => {
       const fpsState = debugTickRef.current
       fpsState.frames += 1
@@ -146,6 +174,10 @@ export function RealtimeMode() {
         topologyArea: gesture.topology.normalizedArea,
         topologyCrossings: gesture.topology.intersections.length,
         harmonyLabel: gesture.harmony.label,
+        gesturePhase: gesture.gestureState.phase,
+        gestureConfidence: gesture.gestureState.confidence,
+        faceIntent: faceIntent.kind,
+        mouthOpen: face?.mouthOpen ?? 0,
         particleSpread: particleControlsRef.current.spread,
         volume: audio.volume,
         bass: audio.bass,
@@ -163,6 +195,7 @@ export function RealtimeMode() {
 
       const video = videoRef.current
       const tracker = trackerRef.current
+      const faceTracker = faceTrackerRef.current
       const audioAnalyser = audioAnalyserRef.current
       const synth = synthRef.current
       let hands: HandData[] = []
@@ -193,8 +226,31 @@ export function RealtimeMode() {
       }
 
       hands = visionTickRef.current.hands
+      if (
+        video &&
+        faceTracker &&
+        video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+        now - faceTickRef.current.lastDetect >= 100
+      ) {
+        try {
+          faceTickRef.current.face = faceTracker.detect(video, now)
+          faceTickRef.current.lastDetect = now
+        } catch (error) {
+          faceTickRef.current.face = null
+          faceTickRef.current.lastDetect = now
+
+          if (now - lastVisionErrorRef.current > 2000) {
+            lastVisionErrorRef.current = now
+            setMessage(`face tracker: ${toErrorMessage(error)}`)
+          }
+        }
+      }
+
+      const face = faceTickRef.current.face
       const targetHand = selectTargetHand(hands)
       const gesture = video ? gestureEngineRef.current.update(targetHand, now, hands) : emptyGestureSnapshot()
+      const faceIntent = analyzeFaceIntent(hands, face)
+      faceIntentRef.current = faceIntent
       synth?.update(gesture.harmony, gesture.topology, now)
 
       if (video) {
@@ -205,13 +261,15 @@ export function RealtimeMode() {
           gesture,
           audio,
           emotion: nextEmotion,
+          face,
+          faceIntent,
           particleControls: particleControlsRef.current,
           visualStyle: visualStyleRef.current,
           now,
         })
       }
 
-      updateDebug(now, targetHand, audio, nextEmotion, gesture)
+      updateDebug(now, targetHand, audio, nextEmotion, gesture, face, faceIntent)
       animationFrameRef.current = window.requestAnimationFrame(renderLoop)
     },
     [updateDebug],
@@ -223,11 +281,11 @@ export function RealtimeMode() {
     }
 
     setStatus('starting')
-    setMessage('requesting camera and microphone')
+    setMessage('正在请求摄像头和麦克风')
 
     try {
       const [cameraStream, micStream] = await Promise.all([
-        requestCameraStream(),
+        requestCameraStream(cameraQualityRef.current),
         requestMicStream(),
       ])
       cameraStreamRef.current = cameraStream
@@ -245,18 +303,30 @@ export function RealtimeMode() {
       await video.play()
       await waitForVideoReady(video)
 
-      setMessage('loading hand tracker')
+      setMessage('正在加载手部识别')
       const tracker = await HandTracker.create()
+      setMessage('正在加载五官锚点')
+      let faceTracker: FaceTracker | null = null
+
+      try {
+        faceTracker = await FaceTracker.create()
+      } catch (error) {
+        console.warn('Face tracker unavailable; continuing without face anchors.', error)
+      }
+
       const audioAnalyser = new MicAudioAnalyser(micStream)
       const synth = new TopologySynthEngine()
       await audioAnalyser.resume()
       await synth.resume()
 
       trackerRef.current = tracker
+      faceTrackerRef.current = faceTracker
       audioAnalyserRef.current = audioAnalyser
       synthRef.current = synth
       gestureEngineRef.current.reset()
       visionTickRef.current = { lastDetect: 0, hands: [] }
+      faceTickRef.current = { lastDetect: 0, face: null }
+      faceIntentRef.current = { kind: 'none', intensity: 0, anchor: null }
       emotionRef.current = createDefaultEmotion()
       setEmotion(emotionRef.current)
       debugTickRef.current = { lastUpdate: 0, lastFpsTime: 0, frames: 0, fps: 0 }
@@ -293,12 +363,14 @@ export function RealtimeMode() {
         status={status}
         message={message}
         visualStyle={visualStyle}
+        cameraQuality={cameraQuality}
         debug={debug}
         emotion={emotion}
         particleControls={particleControls}
         onStart={startRealtime}
         onStop={stopRealtime}
         onVisualStyleChange={setVisualStyle}
+        onCameraQualityChange={setCameraQuality}
         onParticleControlsChange={setParticleControls}
       />
     </main>

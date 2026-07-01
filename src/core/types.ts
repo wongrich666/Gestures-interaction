@@ -13,6 +13,8 @@ export type Point2D = {
 
 export type FingerName = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky'
 
+export type CameraQuality = 'low' | 'medium' | 'high'
+
 export type CanvasRect = Point2D & {
   width: number
   height: number
@@ -22,6 +24,30 @@ export type HandData = {
   handedness: Handedness
   confidence: number
   landmarks: Landmark[]
+}
+
+export type FaceAnchors = {
+  mouth: Landmark
+  nose: Landmark
+  leftEar: Landmark
+  rightEar: Landmark
+  leftEye: Landmark
+  rightEye: Landmark
+}
+
+export type FaceData = {
+  landmarks: Landmark[]
+  anchors: FaceAnchors
+  mouthOpen: number
+  faceScale: number
+}
+
+export type FaceIntentKind = 'none' | 'listen' | 'shout'
+
+export type FaceIntent = {
+  kind: FaceIntentKind
+  intensity: number
+  anchor: Landmark | null
 }
 
 export type AudioFeatures = {
@@ -116,6 +142,23 @@ export type VisualGesture =
   | 'push'
   | 'prayer'
 
+export type GesturePhase =
+  | 'idle'
+  | 'enter'
+  | 'hold'
+  | 'exit'
+
+export type GestureState = {
+  id: VisualGesture
+  phase: GesturePhase
+  confidence: number
+  intensity: number
+  anchor: Landmark | null
+  direction: Point2D | null
+  startedAt: number
+  updatedAt: number
+}
+
 export type FingerState = {
   name: FingerName
   tipIndex: number
@@ -196,6 +239,7 @@ export type GestureSnapshot = {
   handedness: Handedness | 'None'
   handPose: HandPose
   visualGesture: VisualGesture
+  gestureState: GestureState
   effectIntensity: number
   pinch: boolean
   pinchDistance: number
@@ -257,6 +301,10 @@ export type DebugMetrics = {
   topologyArea?: number
   topologyCrossings?: number
   harmonyLabel?: string
+  gesturePhase?: GesturePhase
+  gestureConfidence?: number
+  faceIntent?: FaceIntentKind
+  mouthOpen?: number
   particleSpread?: number
   volume: number
   bass: number

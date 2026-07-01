@@ -6,6 +6,8 @@ import type {
   AudioEmotion,
   AudioFeatures,
   CanvasRect,
+  FaceData,
+  FaceIntent,
   GestureSnapshot,
   HandData,
   ParticleControls,
@@ -14,6 +16,7 @@ import type {
 } from '../core/types'
 import { drawStyledVideo, drawStyleOverlay } from '../effects/frameEffects'
 import {
+  drawFaceIntentOverlay,
   drawGestureEffectOverlay,
   drawTopologyNetwork,
   shouldTriggerGestureBurst,
@@ -28,6 +31,8 @@ export type StageFrame = {
   gesture: GestureSnapshot
   audio: AudioFeatures
   emotion?: AudioEmotion
+  face?: FaceData | null
+  faceIntent?: FaceIntent
   particleControls?: ParticleControls
   visualStyle: VisualStyle
   now: number
@@ -44,6 +49,11 @@ type StageCanvasProps = {
   className?: string
 }
 
+type BurstTiming = {
+  pinchAt: number
+  gestureAt: number
+}
+
 export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
   ({ className }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -51,6 +61,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
     const trailsRef = useRef(new TrailSystem())
     const lastRenderTimeRef = useRef(0)
     const lastVisualGestureRef = useRef<VisualGesture>('none')
+    const burstTimingRef = useRef<BurstTiming>({ pinchAt: -Infinity, gestureAt: -Infinity })
 
     useImperativeHandle(ref, () => ({
       renderFrame(frame) {
@@ -75,6 +86,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
           particlesRef.current,
           deltaMs,
           lastVisualGestureRef.current,
+          burstTimingRef.current,
         )
         lastVisualGestureRef.current = frame.gesture.visualGesture
       },
@@ -83,6 +95,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
         trailsRef.current.clear()
         lastRenderTimeRef.current = 0
         lastVisualGestureRef.current = 'none'
+        burstTimingRef.current = { pinchAt: -Infinity, gestureAt: -Infinity }
 
         const canvas = canvasRef.current
         const ctx = canvas?.getContext('2d')
@@ -123,6 +136,7 @@ function drawFrame(
   particles: ParticleSystem,
   deltaMs: number,
   previousVisualGesture: VisualGesture,
+  burstTiming: BurstTiming,
 ) {
   const emotion = frame.emotion ?? createDefaultEmotion()
   const videoRect = containRect(
@@ -157,7 +171,12 @@ function drawFrame(
     trails.addPoint(focusPoint, frame.now, frame.audio.mid + frame.gesture.indexVelocity * 80)
   }
 
-  if (frame.gesture.pinchEvent === 'pinch_start' && frame.gesture.pinchCenter) {
+  if (
+    frame.gesture.pinchEvent === 'pinch_start' &&
+    frame.gesture.pinchCenter &&
+    frame.now - burstTiming.pinchAt >= 180
+  ) {
+    burstTiming.pinchAt = frame.now
     particles.burst(
       landmarkToCanvas(frame.gesture.pinchCenter, videoRect, frame.mirrored ?? true),
       frame.visualStyle,
@@ -166,7 +185,15 @@ function drawFrame(
     )
   }
 
-  if (shouldTriggerGestureBurst(previousVisualGesture, frame.gesture.visualGesture)) {
+  if (
+    shouldTriggerGestureBurst(
+      previousVisualGesture,
+      frame.gesture.visualGesture,
+      frame.gesture.gestureState.phase,
+    ) &&
+    frame.now - burstTiming.gestureAt >= 260
+  ) {
+    burstTiming.gestureAt = frame.now
     const burstPoint =
       focusPoint ??
       palmPoint ?? {
@@ -193,6 +220,15 @@ function drawFrame(
     ctx,
     videoRect,
     frame.gesture,
+    frame.audio,
+    emotion,
+    frame.now,
+    frame.mirrored ?? true,
+  )
+  drawFaceIntentOverlay(
+    ctx,
+    videoRect,
+    frame.faceIntent,
     frame.audio,
     emotion,
     frame.now,

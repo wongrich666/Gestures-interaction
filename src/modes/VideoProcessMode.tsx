@@ -718,6 +718,23 @@ function buildGestureSnapshot(
         y: targetHand.landmarks[8].y - targetHand.landmarks[5].y,
       })
     : null
+  const gestureChanged = previousFrame?.visualGesture !== frame.visualGesture
+  const gesturePhase =
+    frame.visualGesture === 'none'
+      ? 'idle'
+      : isNewTimelineFrame && gestureChanged
+        ? 'enter'
+        : 'hold'
+  const gestureState = {
+    id: frame.visualGesture,
+    phase: gesturePhase,
+    confidence: frame.visualGesture === 'none' ? 0 : 0.78,
+    intensity: frame.visualGesture === 'none' ? 0 : 0.7,
+    anchor: frame.palmCenter ?? frame.indexTipPosition,
+    direction: indexDirection,
+    startedAt: frame.time * 1000,
+    updatedAt: frame.time * 1000,
+  } as const
 
   return {
     handCount: frame.detectedHands,
@@ -725,6 +742,7 @@ function buildGestureSnapshot(
     handedness: targetHand?.handedness ?? 'None',
     handPose: frame.handPose,
     visualGesture: frame.visualGesture,
+    gestureState,
     effectIntensity: 0.7,
     pinch: frame.pinch,
     pinchDistance: frame.pinchDistance,

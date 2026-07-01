@@ -3,7 +3,9 @@ import type {
   AudioEmotion,
   AudioFeatures,
   CanvasRect,
+  FaceIntent,
   FingerTopology,
+  GesturePhase,
   GestureSnapshot,
   Point2D,
   TopologyPoint,
@@ -125,11 +127,44 @@ export function drawGestureEffectOverlay(
   }
 }
 
-export function shouldTriggerGestureBurst(previous: VisualGesture, next: VisualGesture) {
+export function drawFaceIntentOverlay(
+  ctx: CanvasRenderingContext2D,
+  rect: CanvasRect,
+  faceIntent: FaceIntent | undefined,
+  audio: AudioFeatures,
+  emotion: AudioEmotion,
+  now: number,
+  mirrored: boolean,
+) {
+  if (!faceIntent?.anchor || faceIntent.kind === 'none') {
+    return
+  }
+
+  const anchor = landmarkToCanvas(faceIntent.anchor, rect, mirrored)
+  const intensity = Math.max(0.12, Math.min(1, faceIntent.intensity + audio.mid * 0.18))
+
+  if (faceIntent.kind === 'listen') {
+    drawListenWaves(ctx, anchor, intensity, emotion, now)
+    return
+  }
+
+  if (faceIntent.kind === 'shout') {
+    drawShoutWaves(ctx, anchor, intensity, emotion, audio, now)
+  }
+}
+
+export function shouldTriggerGestureBurst(
+  previous: VisualGesture,
+  next: VisualGesture,
+  phase: GesturePhase,
+) {
   return (
+    phase === 'enter' &&
     previous !== next &&
     (next === 'finger_gun' ||
       next === 'punch' ||
+      next === 'clap' ||
+      next === 'push' ||
       next === 'two_hand_heart' ||
       next === 'finger_heart' ||
       next === 'open_wheel')
@@ -156,6 +191,87 @@ function resolveGestureAnchor(
   }
 
   return null
+}
+
+function drawListenWaves(
+  ctx: CanvasRenderingContext2D,
+  center: Point2D,
+  intensity: number,
+  emotion: AudioEmotion,
+  now: number,
+) {
+  ctx.save()
+  ctx.globalCompositeOperation = 'screen'
+  ctx.lineCap = 'round'
+  ctx.strokeStyle = colorWithAlpha(emotion.palette.glow, 0.24 + intensity * 0.28)
+  ctx.lineWidth = 1.6 + intensity * 1.6
+  ctx.shadowBlur = 20
+  ctx.shadowColor = emotion.palette.glow
+
+  const drift = (now * 0.045) % 18
+
+  for (let index = 0; index < 4; index += 1) {
+    const radius = 18 + index * 13 + drift
+    const alpha = 1 - index * 0.16
+
+    ctx.globalAlpha = Math.max(0.18, alpha)
+    ctx.beginPath()
+    ctx.arc(center.x, center.y, radius, -0.95, 0.95)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(center.x, center.y, radius, Math.PI - 0.95, Math.PI + 0.95)
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+
+function drawShoutWaves(
+  ctx: CanvasRenderingContext2D,
+  center: Point2D,
+  intensity: number,
+  emotion: AudioEmotion,
+  audio: AudioFeatures,
+  now: number,
+) {
+  ctx.save()
+  ctx.globalCompositeOperation = 'screen'
+
+  const pulse = (now * 0.065) % 34
+  const radius = 24 + intensity * 34 + audio.volume * 42 + pulse
+  const gradient = ctx.createRadialGradient(center.x, center.y, 3, center.x, center.y, radius)
+  gradient.addColorStop(0, colorWithAlpha(emotion.palette.highlight, 0.34 + intensity * 0.2))
+  gradient.addColorStop(0.48, colorWithAlpha(emotion.palette.accent, 0.16 + intensity * 0.18))
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
+
+  ctx.fillStyle = gradient
+  ctx.fillRect(center.x - radius, center.y - radius, radius * 2, radius * 2)
+  ctx.strokeStyle = colorWithAlpha(emotion.palette.highlight, 0.28 + intensity * 0.3)
+  ctx.lineWidth = 2 + intensity * 1.8
+  ctx.shadowBlur = 24
+  ctx.shadowColor = emotion.palette.highlight
+
+  for (let index = 0; index < 3; index += 1) {
+    const ring = 18 + index * 22 + pulse
+
+    ctx.globalAlpha = 0.75 - index * 0.16
+    ctx.beginPath()
+    ctx.arc(center.x, center.y, ring, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  for (let ray = 0; ray < 7; ray += 1) {
+    const angle = -0.68 + (ray / 6) * 1.36
+    const length = 46 + intensity * 58 + audio.treble * 24
+
+    ctx.globalAlpha = 0.28 + intensity * 0.28
+    ctx.beginPath()
+    ctx.moveTo(center.x + Math.cos(angle) * 12, center.y + Math.sin(angle) * 12)
+    ctx.lineTo(center.x + Math.cos(angle) * length, center.y + Math.sin(angle) * length)
+    ctx.stroke()
+  }
+
+  ctx.restore()
 }
 
 function drawEmojiOrbit(

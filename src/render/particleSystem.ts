@@ -63,9 +63,14 @@ export class ParticleSystem {
   private backgroundSignature = ''
 
   burst(origin: Point2D, style: VisualStyle, audio: AudioFeatures, emotion?: AudioEmotion) {
-    const count = Math.round(30 + audio.bass * 48)
+    const count = Math.round(24 + audio.bass * 42)
     const force = 2.1 + audio.volume * 3.2
     const hueBase = emotion ? moodHue(emotion.mood) : style === 'blue_tears' ? 196 : style === 'spotlight' ? 48 : 204
+    const maxBurstParticles = 560
+
+    if (this.bursts.length + count > maxBurstParticles) {
+      this.bursts.splice(0, this.bursts.length + count - maxBurstParticles)
+    }
 
     for (let index = 0; index < count; index += 1) {
       const angle = Math.random() * Math.PI * 2
@@ -308,8 +313,8 @@ export class ParticleSystem {
       }
     }
 
-    if (this.bursts.length > 720) {
-      this.bursts.splice(0, this.bursts.length - 720)
+    if (this.bursts.length > 560) {
+      this.bursts.splice(0, this.bursts.length - 560)
     }
   }
 }

@@ -10,7 +10,10 @@ export function InteractionStatusPanel({ debug }: InteractionStatusPanelProps) {
     <div className="interaction-status">
       <div className="status-row">
         <span>手势特效</span>
-        <strong>{debug.visualGesture ?? 'none'}</strong>
+        <strong>
+          {debug.visualGesture ?? 'none'}
+          {debug.gesturePhase ? ` · ${debug.gesturePhase}` : ''}
+        </strong>
       </div>
       <div className="status-row">
         <span>和声映射</span>
@@ -28,6 +31,10 @@ export function InteractionStatusPanel({ debug }: InteractionStatusPanelProps) {
         <div>
           <span>交叉</span>
           <b>{debug.topologyCrossings ?? 0}</b>
+        </div>
+        <div>
+          <span>稳定</span>
+          <b>{formatNumber(debug.gestureConfidence ?? 0)}</b>
         </div>
       </div>
     </div>

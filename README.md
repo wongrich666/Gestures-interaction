@@ -41,13 +41,20 @@ npm run lint
   -> 手指激活 / 掌心 / 拓扑 / 手势分类
   -> Canvas 舞台特效 + Web Audio 和声
 
+摄像头
+  -> video 元素
+  -> MediaPipe Face Landmarker
+  -> 嘴巴 / 耳朵 / 鼻子 / 眼睛锚点
+  -> hand_near_ear / hand_near_mouth 语义判断
+  -> 听觉波纹 / 喊话扩音环
+
 麦克风
   -> Web Audio AnalyserNode
   -> volume / bass / mid / treble / beat
   -> 背景呼吸、粒子强度、情绪色彩、亮度脉冲
 ```
 
-为了降低 live 模式卡顿，MediaPipe 识别已经限频到约 24fps，Canvas 渲染仍跟随 `requestAnimationFrame`，渲染时复用最近一次识别结果。
+为了降低 live 模式卡顿，手部识别已经限频到约 24fps，FaceLandmarker 约 10fps，Canvas 渲染仍跟随 `requestAnimationFrame`，渲染时复用最近一次识别结果。实时模式默认使用 `medium` 摄像头档位，避免一启动就用 720p 给普通 Windows 笔记本带来过高压力。复杂手势会先进入轻量状态机，只有候选手势稳定一小段时间后才切换到 `enter / hold / exit`，减少频繁误触发。
 
 ## 手部关键点
 
@@ -112,7 +119,7 @@ MediaPipe 每只手返回 21 个关键点：
 | 中等跨手交叉 | `crossDensity > 0.30` | 减七变化 |
 | 高密度交叉 | `crossDensity > 0.52` | 多音和声簇 |
 
-和声由 `src/audio/synthEngine.ts` 中的轻量 Web Audio 合成器生成，使用 Oscillator、Gain 和 BiquadFilter，不依赖后端。
+和声由 `src/audio/synthEngine.ts` 中的轻量 Web Audio 合成器生成，使用 Oscillator、Gain、BiquadFilter 和本地噪声 buffer，不依赖后端。
 
 | 和声参数 | 控制来源 |
 | --- | --- |
@@ -122,9 +129,33 @@ MediaPipe 每只手返回 21 个关键点：
 | 声部数量 | 激活指尖数量 |
 | 静音 | 握拳或指尖不足 |
 
+### 分层声音结构
+
+| 层级 | 作用 | 控制来源 |
+| --- | --- | --- |
+| Pad | 持续和声主体 | 和声 family、面积亮度、激活指尖数 |
+| Bass | 低音根音 | 拓扑面积映射出的根音偏移 |
+| Pluck | 拓扑变化拨奏 | 和声变化、激活指尖数、交叉密度 |
+| Noise | 张力噪声层 | 跨手交叉密度 |
+
+握拳或激活指尖不足时，所有层通过 release 渐弱，不会硬切断成明显爆音。
+
 ## 手势到画面特效映射
 
 当前手势识别是基于 21 点关键点的启发式判断，不是训练模型。摄像头角度、遮挡、手离镜头距离会影响结果。
+
+系统会为手势输出一个轻量状态：
+
+| 字段 | 含义 |
+| --- | --- |
+| `gestureState.id` | 当前稳定手势 |
+| `gestureState.phase` | `idle`、`enter`、`hold`、`exit` |
+| `gestureState.confidence` | 当前稳定度，0 到 1 |
+| `gestureState.intensity` | 用于特效强弱的归一化强度 |
+| `gestureState.anchor` | 手势特效锚点 |
+| `gestureState.direction` | 方向型手势的运动方向 |
+
+粒子爆点只在 `enter` 阶段触发，并带有冷却时间；pinch 爆点也有独立冷却，避免快速切换手势时画面被爆发粒子堆满。
 
 | 手势 | 识别条件概要 | 画面效果 |
 | --- | --- | --- |
@@ -149,6 +180,17 @@ MediaPipe 每只手返回 21 个关键点：
 | 指向镜头 | 食指 z 方向明显朝向镜头 | 前指 emoji、轻微爆点 |
 | 推掌 | 手掌张开且掌心移动速度较高 | 扩散波纹 |
 | 祈祷 | 双手靠近且运动较小 | 祈祷 emoji、柔和光点 |
+
+## 五官语义到画面特效映射
+
+FaceLandmarker 只用于低延迟五官锚点，不做实时表情情绪识别。当前实现重点是“动作意图”，让手势舞里靠近耳朵、嘴巴这类语义动作可以被舞台理解。
+
+| 语义动作 | 识别条件概要 | 画面效果 |
+| --- | --- | --- |
+| 侧耳听 | 任意手掌中心或指尖靠近左右耳锚点 | 耳侧双向声波弧线，随音乐中频微亮 |
+| 喊话 / 呼喊 | 手靠近嘴部，且 `mouthOpen` 超过阈值 | 嘴部扩音环、放射声束，随音量和高频增强 |
+
+FaceLandmarker 加载失败时不会阻断实时模式，系统会继续保留手势、粒子、和声与音频响应。
 
 ## 粒子系统
 
@@ -185,6 +227,8 @@ MediaPipe 每只手返回 21 个关键点：
 | 开枪 / 出拳 | 触发小爆点 |
 | 比心 / 双手爱心 | 粒子更紧凑，配合爱心 emoji |
 
+爆发粒子有全局硬预算，超过上限时会裁剪旧粒子，保证 live 模式下快速手势切换不会无限堆积。
+
 ## 声音输入到视觉映射
 
 麦克风输入使用 Web Audio `AnalyserNode` 分析。
@@ -196,6 +240,18 @@ MediaPipe 每只手返回 21 个关键点：
 | `mid` | 250-2000Hz 中频 | 指尖轨迹粗细、光带运动 |
 | `treble` | 2000-8000Hz 高频 | 星点闪烁、emoji 环绕亮度 |
 | `beat` | 低频和音量的节拍检测 | 背景脉冲、网格闪光 |
+
+## 摄像头性能档位
+
+实时模式右侧 `Performance` 区域可以在停止状态下切换摄像头请求规格。
+
+| 档位 | 请求规格 | 适合场景 |
+| --- | --- | --- |
+| Low | 640×360 @ 24fps | 低性能电脑、需要更稳的 live 帧率 |
+| Medium | 960×540 @ 30fps | 默认档位，清晰度和延迟平衡 |
+| High | 1280×720 @ 30fps | 高性能设备、需要更清晰画面 |
+
+切换档位后需要重新启动实时模式，因为浏览器摄像头 track 的约束在运行中切换会带来额外兼容性问题。
 
 ## 音乐情绪映射
 
@@ -275,11 +331,13 @@ Qwen 只用于给上传视频的整体音乐情绪和导演建议做补充，不
 | `src/modes/RealtimeMode.tsx` | 实时模式生命周期、摄像头、麦克风、识别限频、渲染循环 |
 | `src/modes/VideoProcessMode.tsx` | 视频上传、抽帧、timeline、预览、导出 |
 | `src/vision/handTracker.ts` | MediaPipe Hand Landmarker 封装 |
+| `src/vision/faceTracker.ts` | MediaPipe Face Landmarker 封装，提供嘴巴、耳朵等五官锚点 |
+| `src/interaction/faceIntentEngine.ts` | 根据手和五官锚点判断听、喊等动作意图 |
 | `src/interaction/gestureEngine.ts` | 单帧手势状态整合 |
 | `src/interaction/topologyEngine.ts` | 手指激活、指尖拓扑、视觉手势分类、和声状态 |
 | `src/audio/audioAnalyser.ts` | 麦克风音频特征分析 |
 | `src/audio/audioEmotion.ts` | 浏览器端音乐情绪推断 |
-| `src/audio/synthEngine.ts` | 指尖拓扑驱动的 Web Audio 和声合成器 |
+| `src/audio/synthEngine.ts` | 指尖拓扑驱动的 pad / bass / pluck / noise 分层 Web Audio 合成器 |
 | `src/render/StageCanvas.tsx` | Canvas 总渲染入口 |
 | `src/render/particleSystem.ts` | 背景粒子、形态粒子、爆发粒子 |
 | `src/render/gestureEffects.ts` | emoji 环绕、开枪、出拳、轮指、推掌等轻量手势特效 |
@@ -293,7 +351,12 @@ Qwen 只用于给上传视频的整体音乐情绪和导演建议做补充，不
 
 | 策略 | 说明 |
 | --- | --- |
-| MediaPipe 限频 | 识别约 24fps，降低 live 卡顿 |
+| 摄像头档位 | 默认 960×540，提供 640×360 低延迟兜底 |
+| Hand Landmarker 限频 | 手部识别约 24fps，降低 live 卡顿 |
+| Face Landmarker 限频 | 五官锚点约 10fps，并且加载失败不阻断手部实时模式 |
+| 手势状态机 | 候选手势需短暂稳定后才进入，减少切换抖动 |
+| 爆点冷却 | 手势 burst 和 pinch burst 都有冷却时间 |
+| 粒子硬预算 | burst 粒子超过上限时裁剪旧粒子 |
 | 渲染复用 | 60fps 渲染复用最近一次手势识别结果 |
 | 默认粒子密度降低 | 默认 360，用户可手动提高 |
 | 轻量 overlay | emoji、线条、波纹优先使用 Canvas 直接绘制 |
@@ -307,6 +370,7 @@ Qwen 只用于给上传视频的整体音乐情绪和导演建议做补充，不
 | 摄像头打不开 | 在 Chrome / Edge 中允许摄像头权限 |
 | 麦克风打不开 | 允许麦克风权限，关闭占用麦克风的软件 |
 | FPS 低 | 降低粒子密度，避免长时间使用二值/马赛克 |
+| Face 一直是 none | 首次启动需要联网下载 FaceLandmarker 模型；失败时不影响手势 |
 | 手势误识别 | 调整手与摄像头距离，避免手指遮挡 |
 | 和声不响 | 确认已点击启动实时，并且不是握拳或激活指尖过少 |
 | Qwen 不可用 | 启动 Ollama，确认 `ollama list` 中有 Qwen 模型 |
@@ -315,8 +379,10 @@ Qwen 只用于给上传视频的整体音乐情绪和导演建议做补充，不
 ## 当前限制
 
 - 复杂手势识别是启发式规则，不是训练模型。
+- 当前状态机是轻量防抖，不是完整动作阶段识别模型；轮指、出拳等还可以继续拆成 open / rotate / close 等更细阶段。
 - 摄像头角度、手部遮挡、光线会明显影响识别稳定性。
 - “手枪”和“单手比心”形态相近，目前通过拇指食指距离和其他手指状态区分，仍需要实测调阈值。
+- 听、喊语义依赖 FaceLandmarker 锚点，目前不是完整表情识别，也不读取视频帧给 Qwen 做多模态判断。
 - 浏览器原生导出优先得到 webm，稳定 mp4 仍建议 FFmpeg。
 - LootAI 不属于当前 npm 工程，未集成到运行链路中。
 

@@ -1,6 +1,7 @@
-import { VISUAL_STYLES, VISUAL_STYLE_LABELS } from '../core/config'
+import { CAMERA_QUALITY_PRESETS, VISUAL_STYLES, VISUAL_STYLE_LABELS } from '../core/config'
 import type {
   AudioEmotion,
+  CameraQuality,
   DebugMetrics,
   ParticleControls,
   RuntimeStatus,
@@ -16,12 +17,14 @@ type ControlPanelProps = {
   status: RuntimeStatus
   message: string
   visualStyle: VisualStyle
+  cameraQuality: CameraQuality
   particleControls: ParticleControls
   debug: DebugMetrics
   emotion: AudioEmotion
   onStart: () => void
   onStop: () => void
   onVisualStyleChange: (style: VisualStyle) => void
+  onCameraQualityChange: (quality: CameraQuality) => void
   onParticleControlsChange: (controls: ParticleControls) => void
 }
 
@@ -38,15 +41,20 @@ export function ControlPanel({
   status,
   message,
   visualStyle,
+  cameraQuality,
   particleControls,
   debug,
   emotion,
   onStart,
   onStop,
   onVisualStyleChange,
+  onCameraQualityChange,
   onParticleControlsChange,
 }: ControlPanelProps) {
   const starting = status === 'starting'
+  const cameraOptions = Object.entries(CAMERA_QUALITY_PRESETS) as Array<
+    [CameraQuality, (typeof CAMERA_QUALITY_PRESETS)[CameraQuality]]
+  >
 
   return (
     <aside className="control-panel">
@@ -76,6 +84,29 @@ export function ControlPanel({
           </button>
         </div>
         {message ? <p className="message-line">{message}</p> : null}
+      </section>
+
+      <section className="control-block">
+        <h2>Performance</h2>
+        <div className="quality-grid" role="group" aria-label="Camera quality">
+          {cameraOptions.map(([quality, preset]) => (
+            <button
+              className={quality === cameraQuality ? 'style-button active' : 'style-button'}
+              key={quality}
+              type="button"
+              onClick={() => onCameraQualityChange(quality)}
+              disabled={running || starting}
+              title={running || starting ? '停止实时模式后可切换摄像头档位' : undefined}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <p className="meta-line">
+          {CAMERA_QUALITY_PRESETS[cameraQuality].width}×
+          {CAMERA_QUALITY_PRESETS[cameraQuality].height} @{' '}
+          {CAMERA_QUALITY_PRESETS[cameraQuality].frameRate}fps
+        </p>
       </section>
 
       <section className="control-block">
