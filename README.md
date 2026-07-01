@@ -56,6 +56,8 @@ npm run lint
 
 为了降低 live 模式卡顿，手部识别已经限频到约 24fps，FaceLandmarker 约 10fps，Canvas 渲染仍跟随 `requestAnimationFrame`，渲染时复用最近一次识别结果。实时模式默认使用 `medium` 摄像头档位，避免一启动就用 720p 给普通 Windows 笔记本带来过高压力。复杂手势会先进入轻量状态机，只有候选手势稳定一小段时间后才切换到 `enter / hold / exit`，减少频繁误触发。
 
+实时模式和视频模式都不再默认右手为主手。系统会根据置信度、指尖舒展、指尖跨度、pinch、食指指向和朝镜头方向等几何特征，动态选择当前表达最明显的手作为单手特效锚点；双手拓扑、双手爱心、拍手、祈祷等仍然同时使用两只手。主手切换时不会跨手平滑 landmarks，避免左右手切换时产生混合抖动。
+
 ## 手部关键点
 
 MediaPipe 每只手返回 21 个关键点：
@@ -156,6 +158,8 @@ MediaPipe 每只手返回 21 个关键点：
 | `gestureState.direction` | 方向型手势的运动方向 |
 
 粒子爆点只在 `enter` 阶段触发，并带有冷却时间；pinch 爆点也有独立冷却，避免快速切换手势时画面被爆发粒子堆满。
+
+单手类手势没有左右手优先级：左手做 OK、比耶、指向、开枪等，也会作为当前交互手触发对应特效。画面骨架也不再把非主手压成灰色，两只手都会保持发光显示。
 
 | 手势 | 识别条件概要 | 画面效果 |
 | --- | --- | --- |
@@ -334,6 +338,7 @@ Qwen 只用于给上传视频的整体音乐情绪和导演建议做补充，不
 | `src/vision/faceTracker.ts` | MediaPipe Face Landmarker 封装，提供嘴巴、耳朵等五官锚点 |
 | `src/interaction/faceIntentEngine.ts` | 根据手和五官锚点判断听、喊等动作意图 |
 | `src/interaction/gestureEngine.ts` | 单帧手势状态整合 |
+| `src/interaction/handSelection.ts` | 无左右偏置的当前交互手选择 |
 | `src/interaction/topologyEngine.ts` | 手指激活、指尖拓扑、视觉手势分类、和声状态 |
 | `src/audio/audioAnalyser.ts` | 麦克风音频特征分析 |
 | `src/audio/audioEmotion.ts` | 浏览器端音乐情绪推断 |

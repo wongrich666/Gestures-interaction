@@ -344,15 +344,17 @@ function drawHands(
       ? style === 'spotlight'
         ? colorWithAlpha(emotion.palette.highlight, 0.82 + audio.treble * 0.18)
         : colorWithAlpha(emotion.palette.glow, 0.78 + audio.treble * 0.2)
-      : 'rgba(255, 255, 255, 0.36)'
-    const pointColor = isTarget ? emotion.palette.highlight : 'rgba(255, 255, 255, 0.55)'
+      : colorWithAlpha(emotion.palette.accent, 0.48 + audio.treble * 0.14)
+    const pointColor = isTarget
+      ? emotion.palette.highlight
+      : colorWithAlpha(emotion.palette.glow, 0.58)
 
     ctx.save()
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    ctx.lineWidth = isTarget ? 2.2 + audio.bass * 3 : 1.4
+    ctx.lineWidth = isTarget ? 2.2 + audio.bass * 3 : 1.7 + audio.bass * 1.4
     ctx.strokeStyle = lineColor
-    ctx.shadowBlur = isTarget ? 14 + audio.bass * 18 : 0
+    ctx.shadowBlur = isTarget ? 14 + audio.bass * 18 : 8 + audio.bass * 8
     ctx.shadowColor = lineColor
 
     for (const [startIndex, endIndex] of HAND_CONNECTIONS) {

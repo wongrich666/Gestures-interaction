@@ -9,6 +9,7 @@ import { EMPTY_AUDIO_FEATURES, VISUAL_STYLES, VISUAL_STYLE_LABELS } from '../cor
 import { landmarkDistance, midpoint, normalizeVector } from '../core/math'
 import type {
   AudioTimelineFrame,
+  DebugMetrics,
   EmotionSummary,
   GestureFrame,
   GestureSnapshot,
@@ -28,6 +29,7 @@ import {
   waitForVideoMetadata,
 } from '../input/videoFileInput'
 import { emptyGestureSnapshot as createEmptyGestureSnapshot, GestureEngine } from '../interaction/gestureEngine'
+import { selectInteractiveHand } from '../interaction/handSelection'
 import { StageCanvas, type StageCanvasHandle } from '../render/StageCanvas'
 import { DebugPanel } from '../ui/DebugPanel'
 import { EmotionPanel } from '../ui/EmotionPanel'
@@ -483,7 +485,7 @@ export function VideoProcessMode() {
     }
   }, [stopPreviewLoop])
 
-  const debug = {
+  const debug: DebugMetrics = {
     detectedHand: Boolean(debugFrame?.detectedHands),
     handedness: selectTargetHand(debugFrame?.hands ?? [])?.handedness ?? 'None',
     pinch: debugFrame?.pinch ?? false,
@@ -494,6 +496,8 @@ export function VideoProcessMode() {
     topologyArea: debugFrame?.topology.normalizedArea ?? 0,
     topologyCrossings: debugFrame?.topology.intersections.length ?? 0,
     harmonyLabel: debugFrame?.harmony.label ?? '静音',
+    gesturePhase: debugFrame?.visualGesture === 'none' ? 'idle' : 'hold',
+    gestureConfidence: debugFrame?.visualGesture === 'none' ? 0 : 0.78,
     volume: debugAudio?.volume ?? 0,
     bass: debugAudio?.bass ?? 0,
     particleSpread: 1,
@@ -767,7 +771,7 @@ function emptyGestureSnapshot(): GestureSnapshot {
 }
 
 function selectTargetHand(hands: HandData[]) {
-  return hands.find((hand) => hand.handedness === 'Right') ?? hands[0] ?? null
+  return selectInteractiveHand(hands)
 }
 
 function clampIndex<T>(index: number, items: T[]) {

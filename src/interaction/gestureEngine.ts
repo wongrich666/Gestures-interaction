@@ -23,6 +23,7 @@ export class GestureEngine {
   private previousIndexTip: Landmark | null = null
   private previousTimestamp = 0
   private previousLandmarks: Landmark[] | null = null
+  private previousTargetKey = ''
   private stableGesture: VisualGesture = 'none'
   private pendingGesture: VisualGesture = 'none'
   private pendingSince = 0
@@ -39,6 +40,7 @@ export class GestureEngine {
       this.pinching = false
       this.previousIndexTip = null
       this.previousLandmarks = null
+      this.previousTargetKey = ''
       const gestureState = this.resolveGestureState('none', 0, null, null, now)
 
       return {
@@ -67,8 +69,13 @@ export class GestureEngine {
       }
     }
 
-    const landmarks = smoothLandmarks(this.previousLandmarks, targetHand.landmarks)
+    const targetKey = resolveHandKey(targetHand, allHands.indexOf(targetHand))
+    const landmarks =
+      this.previousTargetKey === targetKey
+        ? smoothLandmarks(this.previousLandmarks, targetHand.landmarks)
+        : targetHand.landmarks
     this.previousLandmarks = landmarks
+    this.previousTargetKey = targetKey
 
     const targetState =
       analysis.handStates.find((state) => state.handedness === targetHand.handedness) ??
@@ -132,6 +139,7 @@ export class GestureEngine {
     this.previousIndexTip = null
     this.previousTimestamp = 0
     this.previousLandmarks = null
+    this.previousTargetKey = ''
     this.stableGesture = 'none'
     this.pendingGesture = 'none'
     this.pendingSince = 0
@@ -262,6 +270,10 @@ function isBurstGesture(gesture: VisualGesture) {
     gesture === 'two_hand_heart' ||
     gesture === 'finger_heart'
   )
+}
+
+function resolveHandKey(hand: HandData, index: number) {
+  return hand.handedness === 'Unknown' ? `Unknown:${index}` : hand.handedness
 }
 
 function resolveTwoHandDistance(handStates: GestureSnapshot['handStates']) {

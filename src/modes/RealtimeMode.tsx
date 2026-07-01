@@ -23,6 +23,7 @@ import { requestCameraStream, stopMediaStream, waitForVideoReady } from '../inpu
 import { requestMicStream } from '../input/micInput'
 import { analyzeFaceIntent } from '../interaction/faceIntentEngine'
 import { emptyGestureSnapshot, GestureEngine } from '../interaction/gestureEngine'
+import { selectInteractiveHand } from '../interaction/handSelection'
 import { HandTracker } from '../vision/handTracker'
 import { FaceTracker } from '../vision/faceTracker'
 import { StageCanvas, type StageCanvasHandle } from '../render/StageCanvas'
@@ -378,7 +379,7 @@ export function RealtimeMode() {
 }
 
 function selectTargetHand(hands: HandData[]) {
-  return hands.find((hand) => hand.handedness === 'Right') ?? hands[0] ?? null
+  return selectInteractiveHand(hands)
 }
 
 function toErrorMessage(error: unknown) {
