@@ -1,78 +1,329 @@
-# gesture-stage
+# Gesture Stage
 
-Browser-based realtime gesture and music interaction tool built with Vite, React, TypeScript, MediaPipe, Web Audio, Canvas, and optional local Qwen/Ollama analysis.
+一个运行在浏览器本地的「手势 + 音乐 + 视觉特效」互动演出工具。项目基于 Vite、React、TypeScript、MediaPipe Hand Landmarker、Web Audio API 和 Canvas，实现实时摄像头手势识别、麦克风音频分析、指尖拓扑和声、粒子舞台、视频处理预览和本地导出。
 
-## Run
+当前项目重点不是普通音乐可视化，而是把手势设计成一种表演语言：手指、掌心、双手距离、指尖拓扑、声音能量和音乐情绪共同驱动画面与声音。
+
+## 运行方式
 
 ```powershell
 npm install
 npm run dev
 ```
 
-Open:
+打开：
 
 ```text
 http://127.0.0.1:5173/
 ```
 
-Production check:
+检查构建：
 
 ```powershell
 npm run build
 npm run lint
 ```
 
-## Features
+## 当前模式
 
-- Realtime mode: camera + microphone + hand landmarks + music-reactive visuals.
-- Video mode: upload a local video, generate gesture/audio/emotion timelines, preview, and export.
-- MediaPipe Hand Landmarker with GPU attempt and CPU fallback.
-- 21 hand landmarks, hand skeleton overlay, index fingertip trails, and pinch bursts.
-- Music emotion inference from `volume`, `bass`, `mid`, `treble`, and beat density.
-- Emotion-driven stage palette, hand skeleton, trails, particles, lighting, and pulse effects.
-- Visual styles: `normal`, `binary`, `mosaic`, `blue_tears`, `spotlight`, `aurora`, `ink`, `pulse_grid`.
-- Optional local Qwen/Ollama emotion-director summary.
-- Export `gesture_timeline.json`, `audio_timeline.json`, `gesture_stage_timeline.json`, and processed `webm`.
-- FFmpeg command provided for converting exported `webm` to `mp4`.
+| 模式 | 用途 | 当前状态 |
+| --- | --- | --- |
+| 实时演出模式 | 摄像头 + 麦克风实时驱动手势、粒子、和声、视觉风格 | 已实现 |
+| 视频处理模式 | 上传本地视频，生成手势 timeline、音频 timeline，预览特效并导出 webm | 已实现基础版 |
 
-## Key Files
+## 实时数据流
 
-- `src/modes/RealtimeMode.tsx`: realtime lifecycle, permissions, render loop.
-- `src/modes/VideoProcessMode.tsx`: upload, timeline generation, emotion summary, preview, export.
-- `src/audio/audioEmotion.ts`: browser-side music emotion inference.
-- `src/audio/ollamaEmotion.ts`: optional local Qwen/Ollama emotion summary.
-- `src/vision/handTracker.ts`: MediaPipe hand tracking wrapper.
-- `src/render/StageCanvas.tsx`: stage background, skeleton, trails, particles.
-- `src/effects/frameEffects.ts`: image styles and stage overlays.
-- `src/export/mediaRecorderExport.ts`: local `webm` recording and download helpers.
+```text
+摄像头
+  -> video 元素
+  -> MediaPipe Hand Landmarker
+  -> 21 点手部关键点
+  -> 手指激活 / 掌心 / 拓扑 / 手势分类
+  -> Canvas 舞台特效 + Web Audio 和声
 
-## Video Workflow
+麦克风
+  -> Web Audio AnalyserNode
+  -> volume / bass / mid / treble / beat
+  -> 背景呼吸、粒子强度、情绪色彩、亮度脉冲
+```
 
-1. Switch to `视频处理`.
-2. Upload a local video file.
-3. Click `生成情绪 timeline`.
-4. Optionally click `Qwen 情绪导演` to refine the global mood and director note.
-5. Scrub the timeline or preview the processed canvas.
-6. Export `gesture_timeline.json`, `audio_timeline.json`, `gesture_stage_timeline.json`, or `webm`.
-7. Convert exported `webm` to `mp4` if needed:
+为了降低 live 模式卡顿，MediaPipe 识别已经限频到约 24fps，Canvas 渲染仍跟随 `requestAnimationFrame`，渲染时复用最近一次识别结果。
+
+## 手部关键点
+
+MediaPipe 每只手返回 21 个关键点：
+
+| 关键点 | 含义 |
+| --- | --- |
+| 0 | 手腕 |
+| 4 | 拇指尖 |
+| 8 | 食指尖 |
+| 12 | 中指尖 |
+| 16 | 无名指尖 |
+| 20 | 小指尖 |
+| 5 | 食指根部 MCP |
+| 9 | 中指根部 MCP |
+| 13 | 无名指根部 MCP |
+| 17 | 小指根部 MCP |
+
+## 手指激活判定
+
+每根手指都会计算：
+
+| 指标 | 含义 | 用途 |
+| --- | --- | --- |
+| `extension` | 手指伸展程度，0 到 1 | 判断舒展 / 收拢 |
+| `curl` | 弯曲程度，等于 `1 - extension` | 判断握拳、收指 |
+| `tip` | 指尖坐标 | 拓扑网络、特效锚点 |
+| `extended` | 是否激活 | 参与拓扑和手势判断 |
+
+判定逻辑结合两类特征：
+
+| 特征 | 说明 |
+| --- | --- |
+| 关节角度 | 通过 MCP、PIP、DIP、TIP 的夹角判断手指是否伸直 |
+| 指尖距离 | 指尖到手腕 / 掌心的距离，用于辅助判断收拢和舒展 |
+
+握拳会被视为演奏终止信号：当手指整体收拢并进入 fist 状态时，指尖拓扑被清空，和声快速静音。
+
+## 指尖拓扑系统
+
+系统会收集左右手所有激活指尖，并建立双向全连接网络。
+
+| 拓扑特征 | 含义 | 映射用途 |
+| --- | --- | --- |
+| `activeTips` | 当前全部激活指尖 | 控制和声声部数量、画面连线 |
+| `segments` | 指尖之间的全连接线段 | 形成可视化拓扑网 |
+| `polygonArea` | 激活指尖围合区域面积 | 控制和声明亮度 |
+| `normalizedArea` | 归一化面积，0 到 1 | 选择大三、小三、挂留等和声族 |
+| `intersections` | 跨手线段交叉点 | 触发变化和声、交叉高亮 |
+| `crossDensity` | 交叉密度，0 到 1 | 控制不协和度 |
+| `muted` | 是否静音 | 握拳或激活指尖不足时静音 |
+
+## 手势到和声映射
+
+| 输入 | 条件 | 和声结果 |
+| --- | --- | --- |
+| 握拳 / 激活指尖不足 | `muted = true` | 静音 |
+| 拓扑面积较小 | `normalizedArea < 0.34` | 小三和声 |
+| 拓扑面积中等 | `0.34 <= normalizedArea < 0.66` | 挂留和声 |
+| 拓扑面积较大 | `normalizedArea >= 0.66` | 大三和声 |
+| 少量跨手交叉 | `crossDensity > 0.14` | 增六变化 |
+| 中等跨手交叉 | `crossDensity > 0.30` | 减七变化 |
+| 高密度交叉 | `crossDensity > 0.52` | 多音和声簇 |
+
+和声由 `src/audio/synthEngine.ts` 中的轻量 Web Audio 合成器生成，使用 Oscillator、Gain 和 BiquadFilter，不依赖后端。
+
+| 和声参数 | 控制来源 |
+| --- | --- |
+| 根音偏移 | 拓扑面积 |
+| 滤波亮度 | 拓扑面积 |
+| 不协和 detune | 交叉密度 |
+| 声部数量 | 激活指尖数量 |
+| 静音 | 握拳或指尖不足 |
+
+## 手势到画面特效映射
+
+当前手势识别是基于 21 点关键点的启发式判断，不是训练模型。摄像头角度、遮挡、手离镜头距离会影响结果。
+
+| 手势 | 识别条件概要 | 画面效果 |
+| --- | --- | --- |
+| 五指张开转圈 / 轮指 | 手掌高度舒展，腕部旋转速度较高 | 螺旋光线、粒子放大散开 |
+| 握拳出拳 | fist 状态，掌心移动速度较高 | 冲击波、放射线、粒子爆点 |
+| 握拳前后/左右晃动 | fist 状态，腕部旋转速度较高 | 轻微放大震动光圈 |
+| 爪爪晃动 | 握拳或半握拳，腕部晃动 | 光圈震动，半透明爱心环绕 |
+| 开枪手势 | 拇指 + 食指，或拇指 + 食指 + 中指伸出，且无名指小指收起 | 指尖方向光束、小爆炸 |
+| 仅食指 | 只有食指伸出 | 积极 emoji 围绕指尖 3D 环绕 |
+| 比耶 | 食指 + 中指伸出 | 愉悦 emoji 围绕指尖 3D 环绕 |
+| OK | 拇指和食指接近成环，中指/无名指/小指伸出 | OK 相关 emoji 环绕 |
+| 单手比心 | 拇指和食指接近，且区别于开枪手势 | 比心 emoji、粒子爆点 |
+| 双手爱心 | 双手拇指/食指靠近，双手掌心距离较近 | 双手爱心 emoji、粒子爆点 |
+| 拍手 | 双手靠近且掌心运动明显 | 拍手 emoji、节奏闪光 |
+| 点赞 | 仅拇指伸出，方向偏上 | 点赞 emoji |
+| 点踩 | 仅拇指伸出，方向偏下 | 点踩 emoji |
+| 打电话 | 拇指 + 小指伸出 | 电话 emoji 环绕 |
+| 向左指 | 仅食指伸出且方向偏左 | 左指 emoji |
+| 向右指 | 仅食指伸出且方向偏右 | 右指 emoji |
+| 向上指 | 仅食指伸出且方向偏上 | 星点 / 向上指 emoji |
+| 向下指 | 仅食指伸出且方向偏下 | 蓝色点 / 向下指 emoji |
+| 指向镜头 | 食指 z 方向明显朝向镜头 | 前指 emoji、轻微爆点 |
+| 推掌 | 手掌张开且掌心移动速度较高 | 扩散波纹 |
+| 祈祷 | 双手靠近且运动较小 | 祈祷 emoji、柔和光点 |
+
+## 粒子系统
+
+粒子系统分为三层：
+
+| 层级 | 说明 |
+| --- | --- |
+| 背景粒子 | 随机散布在深空中，提供空间纵深 |
+| 形态粒子 | 根据预设或手绘形态聚合，受手势控制扩散 |
+| 爆发粒子 | pinch、开枪、出拳、比心等事件触发 |
+
+### 粒子控制
+
+| 控件 | 作用 |
+| --- | --- |
+| 星云 | 默认螺旋星云粒子形态 |
+| 爱心 | 爱心形态粒子 |
+| 星球 | 球体分布粒子 |
+| 星环 | 环形轨道粒子 |
+| 手绘 | 根据用户在手绘板上画的图案生成粒子形态 |
+| 密度 | 控制粒子数量，默认 360 |
+| 扩散 | 控制粒子形态整体尺度 |
+| 颜色 | 控制形态粒子的主色相 |
+
+### 手势对粒子的影响
+
+| 手势 / 状态 | 粒子行为 |
+| --- | --- |
+| 手掌张开 | 粒子扩散 |
+| 手掌收拢 / 握拳 | 粒子聚合或静音收束 |
+| 双手距离拉开 | 粒子整体尺度扩大 |
+| pinch_start | 触发一次粒子爆发 |
+| 轮指 | 粒子显著放大并旋转散开 |
+| 开枪 / 出拳 | 触发小爆点 |
+| 比心 / 双手爱心 | 粒子更紧凑，配合爱心 emoji |
+
+## 声音输入到视觉映射
+
+麦克风输入使用 Web Audio `AnalyserNode` 分析。
+
+| 音频特征 | 来源 | 视觉映射 |
+| --- | --- | --- |
+| `volume` | 时域 RMS 音量 | 整体动态强度、爆发力度 |
+| `bass` | 20-250Hz 低频 | 背景呼吸、粒子膨胀、视频风格强度 |
+| `mid` | 250-2000Hz 中频 | 指尖轨迹粗细、光带运动 |
+| `treble` | 2000-8000Hz 高频 | 星点闪烁、emoji 环绕亮度 |
+| `beat` | 低频和音量的节拍检测 | 背景脉冲、网格闪光 |
+
+## 音乐情绪映射
+
+浏览器端会根据 volume、bass、mid、treble、beat 推断音乐情绪。
+
+| 情绪 | 视觉倾向 |
+| --- | --- |
+| serene | 柔和、偏青绿、平稳流动 |
+| melancholy | 冷蓝、暗部更重 |
+| euphoric | 高亮、粉紫/黄色点缀 |
+| tense | 高对比、锐利闪烁 |
+| fierce | 红橙冲击、强脉冲 |
+| ethereal | 蓝绿、空气感、轻漂浮 |
+
+情绪会影响：
+
+| 模块 | 影响 |
+| --- | --- |
+| 背景色 | 舞台底色和暗部色彩 |
+| 手部骨架 | 线条颜色和发光强度 |
+| 粒子 | hue、发光、脉冲 |
+| 轨迹 | 指尖光轨颜色与粗细 |
+| 视频风格 overlay | 聚光、极光、网格、墨迹等色彩 |
+
+## 视频画风处理
+
+| 风格 | 含义 | 实现方式 |
+| --- | --- | --- |
+| 原片 | 保持摄像头 / 视频原始画面 | 直接绘制视频 |
+| 二值 | 黑白阈值化，强烈视觉处理感 | 根据亮度阈值改写像素 |
+| 马赛克 | 像素块风格 | 降采样再放大 |
+| 蓝眼泪 | 蓝色发光、水感氛围 | 蓝色渐变叠加和 screen 混合 |
+| 聚光 | 音乐剧舞台聚光 | 以手指或中心为焦点的径向光 |
+| 情绪光场 | 极光式流动光带 | 多条正弦光带叠加 |
+| 墨迹 | 水墨/笔触感 | 深色 multiply + 发光笔触 |
+| 节拍网格 | 复古赛博地面网格 | 透视网格随节拍移动 |
+
+## 视频处理模式
+
+视频处理模式用于本地上传视频并生成 timeline。
+
+| 功能 | 当前状态 |
+| --- | --- |
+| 上传本地视频 | 已实现 |
+| 视频预览 | 已实现 |
+| 15fps 抽帧识别手势 | 已实现 |
+| 生成 `gesture_timeline.json` | 已实现 |
+| 生成 `audio_timeline.json` | 已实现 |
+| 生成完整 `gesture_stage_timeline.json` | 已实现 |
+| Canvas 合成预览 | 已实现 |
+| 导出 webm | 已实现 |
+| mp4 导出 | 通过 FFmpeg 命令转换 |
+
+转换命令：
 
 ```powershell
 ffmpeg -i input.webm -c:v libx264 -pix_fmt yuv420p -c:a aac output.mp4
 ```
 
-## Privacy And Local Processing
+## 本地 Qwen / Ollama
 
-- Camera frames, microphone input, and uploaded videos stay in the browser.
-- Uploaded-video processing stores timelines, not all decoded image frames.
-- Qwen analysis is optional and local-only. The app checks `http://127.0.0.1:11434` for an Ollama Qwen model and sends compact timeline feature summaries, not camera frames or raw video.
-- The first hand-tracker load downloads MediaPipe WASM and model files from official CDN/storage URLs.
+项目支持可选的本地 Qwen 情绪导演分析。
 
-## Common Issues
+| 项目 | 说明 |
+| --- | --- |
+| 服务地址 | `http://127.0.0.1:11434` |
+| 当前检测模型示例 | `qwen3:4b` |
+| 发送内容 | 压缩后的音频 timeline 特征摘要 |
+| 不发送内容 | 摄像头画面、原始视频帧、麦克风原始音频 |
 
-- Permission denied: allow camera and microphone in browser site settings, then start again.
-- Device busy: close other apps using the camera or microphone.
-- Blank tracker: check that the MediaPipe model URL is reachable, then reload the page.
-- Low FPS: switch away from `binary` or `mosaic`, or reduce camera resolution.
-- Video export fails: use Chrome or Edge and confirm `MediaRecorder` plus `canvas.captureStream` are available.
-- Qwen button is disabled or not useful: start Ollama and make sure `ollama list` includes a Qwen model such as `qwen3:4b`.
-- LootAI is not part of this npm project. Install it only from an official installer or account page.
+Qwen 只用于给上传视频的整体音乐情绪和导演建议做补充，不影响实时核心功能。
+
+## 主要文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `src/modes/RealtimeMode.tsx` | 实时模式生命周期、摄像头、麦克风、识别限频、渲染循环 |
+| `src/modes/VideoProcessMode.tsx` | 视频上传、抽帧、timeline、预览、导出 |
+| `src/vision/handTracker.ts` | MediaPipe Hand Landmarker 封装 |
+| `src/interaction/gestureEngine.ts` | 单帧手势状态整合 |
+| `src/interaction/topologyEngine.ts` | 手指激活、指尖拓扑、视觉手势分类、和声状态 |
+| `src/audio/audioAnalyser.ts` | 麦克风音频特征分析 |
+| `src/audio/audioEmotion.ts` | 浏览器端音乐情绪推断 |
+| `src/audio/synthEngine.ts` | 指尖拓扑驱动的 Web Audio 和声合成器 |
+| `src/render/StageCanvas.tsx` | Canvas 总渲染入口 |
+| `src/render/particleSystem.ts` | 背景粒子、形态粒子、爆发粒子 |
+| `src/render/gestureEffects.ts` | emoji 环绕、开枪、出拳、轮指、推掌等轻量手势特效 |
+| `src/effects/frameEffects.ts` | 视频画风处理 |
+| `src/ui/ControlPanel.tsx` | 右侧控制面板 |
+| `src/ui/ParticlePanel.tsx` | 粒子预设、密度、扩散、颜色、手绘形态 |
+| `src/ui/InteractionStatusPanel.tsx` | 当前手势特效和拓扑和声状态 |
+| `src/ui/DebugPanel.tsx` | 调试指标 |
+
+## 性能策略
+
+| 策略 | 说明 |
+| --- | --- |
+| MediaPipe 限频 | 识别约 24fps，降低 live 卡顿 |
+| 渲染复用 | 60fps 渲染复用最近一次手势识别结果 |
+| 默认粒子密度降低 | 默认 360，用户可手动提高 |
+| 轻量 overlay | emoji、线条、波纹优先使用 Canvas 直接绘制 |
+| 本地处理 | 不使用后端，减少传输延迟 |
+
+## 常见问题
+
+| 问题 | 处理 |
+| --- | --- |
+| 页面空白 | 强制刷新 `Ctrl + F5`，并看 Vite 日志是否有 React error |
+| 摄像头打不开 | 在 Chrome / Edge 中允许摄像头权限 |
+| 麦克风打不开 | 允许麦克风权限，关闭占用麦克风的软件 |
+| FPS 低 | 降低粒子密度，避免长时间使用二值/马赛克 |
+| 手势误识别 | 调整手与摄像头距离，避免手指遮挡 |
+| 和声不响 | 确认已点击启动实时，并且不是握拳或激活指尖过少 |
+| Qwen 不可用 | 启动 Ollama，确认 `ollama list` 中有 Qwen 模型 |
+| webm 转 mp4 | 安装 FFmpeg 并加入 PATH |
+
+## 当前限制
+
+- 复杂手势识别是启发式规则，不是训练模型。
+- 摄像头角度、手部遮挡、光线会明显影响识别稳定性。
+- “手枪”和“单手比心”形态相近，目前通过拇指食指距离和其他手指状态区分，仍需要实测调阈值。
+- 浏览器原生导出优先得到 webm，稳定 mp4 仍建议 FFmpeg。
+- LootAI 不属于当前 npm 工程，未集成到运行链路中。
+
+## 后续建议
+
+1. 为每类手势增加可视化校准页面，显示每根手指的 `extension`。
+2. 增加手势优先级调参面板，解决相似手势冲突。
+3. 增加身体姿态识别，把舞蹈动作纳入表演语言。
+4. 增加 timeline 编辑器，让上传视频可以手动修正误识别片段。
+5. 增加预设演出风格，例如音乐剧、赛博、蓝眼泪、水墨、可爱 emoji。
