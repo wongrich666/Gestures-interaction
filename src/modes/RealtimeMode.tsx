@@ -62,6 +62,8 @@ const initialDebug: DebugMetrics = {
 
 const DEFAULT_SYNTH_VOLUME = 0.72
 
+type AudioOutputState = 'idle' | 'locked' | 'ready' | 'unavailable'
+
 export function RealtimeMode() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const stageRef = useRef<StageCanvasHandle | null>(null)
@@ -106,6 +108,7 @@ export function RealtimeMode() {
     DEFAULT_PARTICLE_CONTROLS,
   )
   const [faceIntentEnabled, setFaceIntentEnabled] = useState(false)
+  const [audioOutputState, setAudioOutputState] = useState<AudioOutputState>('idle')
   const [emotion, setEmotion] = useState<AudioEmotion>(createDefaultEmotion())
   const [debug, setDebug] = useState<DebugMetrics>(initialDebug)
 
@@ -187,8 +190,28 @@ export function RealtimeMode() {
     setRunning(false)
     setStatus('stopped')
     setMessage('')
+    setAudioOutputState('idle')
     setDebug(initialDebug)
   }, [releaseResources])
+
+  const unlockAudioOutput = useCallback(async () => {
+    const synth = synthRef.current
+
+    if (!synth) {
+      setMessage('请先启动实时模式，再点击解锁/测试声音。')
+      setAudioOutputState('idle')
+      return
+    }
+
+    try {
+      await synth.playTestTone()
+      setAudioOutputState('ready')
+      setMessage('已触发测试音。如果听不到，请检查系统输出设备和浏览器标签页音量。')
+    } catch (error) {
+      setAudioOutputState('locked')
+      setMessage(`audio output: ${toErrorMessage(error)}`)
+    }
+  }, [])
 
   const updateDebug = useCallback(
     (
@@ -390,15 +413,30 @@ export function RealtimeMode() {
       }
 
       let audioAnalyser: MicAudioAnalyser | null = null
-      const synth = new TopologySynthEngine()
-      synth.setVolume(synthVolumeRef.current)
+      let synth: TopologySynthEngine | null = null
+
+      try {
+        synth = new TopologySynthEngine()
+        synth.setVolume(synthVolumeRef.current)
+      } catch (error) {
+        console.warn('Synth unavailable; continuing without audio output.', error)
+        setAudioOutputState('unavailable')
+      }
 
       if (micStream) {
         audioAnalyser = new MicAudioAnalyser(micStream)
         await audioAnalyser.resume()
       }
 
-      await synth.resume()
+      if (synth) {
+        try {
+          const outputState = await synth.resume()
+          setAudioOutputState(outputState === 'running' ? 'ready' : 'locked')
+        } catch (error) {
+          console.warn('Audio output locked; continuing without synth output.', error)
+          setAudioOutputState('locked')
+        }
+      }
 
       trackerRef.current = tracker
       faceTrackerRef.current = faceTracker
@@ -463,6 +501,7 @@ export function RealtimeMode() {
         harmonyControls={harmonyControls}
         liquidControls={liquidControls}
         faceIntentEnabled={faceIntentEnabled}
+        audioOutputState={audioOutputState}
         debug={debug}
         emotion={emotion}
         particleControls={particleControls}
@@ -474,6 +513,7 @@ export function RealtimeMode() {
         onHarmonyControlsChange={setHarmonyControls}
         onLiquidControlsChange={setLiquidControls}
         onFaceIntentEnabledChange={setFaceIntentEnabled}
+        onUnlockAudioOutput={unlockAudioOutput}
         onParticleControlsChange={setParticleControls}
       />
     </main>

@@ -84,7 +84,43 @@ export class TopologySynthEngine {
       await this.audioContext.resume()
     }
 
-    this.started = true
+    this.started = this.audioContext.state === 'running'
+    return this.audioContext.state
+  }
+
+  getState() {
+    return this.audioContext.state
+  }
+
+  async playTestTone() {
+    const state = await this.resume()
+
+    if (state !== 'running') {
+      throw new Error('浏览器尚未允许音频输出，请点击页面上的解锁/测试声音按钮。')
+    }
+
+    const oscillator = this.audioContext.createOscillator()
+    const gain = this.audioContext.createGain()
+    const now = this.audioContext.currentTime
+
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(440, now)
+    oscillator.frequency.exponentialRampToValueAtTime(660, now + 0.18)
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.12 * this.volume + 0.015, now + 0.025)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42)
+    oscillator.connect(gain)
+    gain.connect(this.audioContext.destination)
+    oscillator.start(now)
+    oscillator.stop(now + 0.46)
+    oscillator.addEventListener(
+      'ended',
+      () => {
+        oscillator.disconnect()
+        gain.disconnect()
+      },
+      { once: true },
+    )
   }
 
   setVolume(volume: number) {

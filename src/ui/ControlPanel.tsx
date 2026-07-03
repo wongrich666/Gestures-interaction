@@ -33,6 +33,7 @@ type ControlPanelProps = {
   liquidControls: LiquidControls
   particleControls: ParticleControls
   faceIntentEnabled: boolean
+  audioOutputState: 'idle' | 'locked' | 'ready' | 'unavailable'
   debug: DebugMetrics
   emotion: AudioEmotion
   onStart: () => void
@@ -43,6 +44,7 @@ type ControlPanelProps = {
   onHarmonyControlsChange: (controls: HarmonyControls) => void
   onLiquidControlsChange: (controls: LiquidControls) => void
   onFaceIntentEnabledChange: (enabled: boolean) => void
+  onUnlockAudioOutput: () => void
   onParticleControlsChange: (controls: ParticleControls) => void
 }
 
@@ -65,6 +67,7 @@ export function ControlPanel({
   liquidControls,
   particleControls,
   faceIntentEnabled,
+  audioOutputState,
   debug,
   emotion,
   onStart,
@@ -75,6 +78,7 @@ export function ControlPanel({
   onHarmonyControlsChange,
   onLiquidControlsChange,
   onFaceIntentEnabledChange,
+  onUnlockAudioOutput,
   onParticleControlsChange,
 }: ControlPanelProps) {
   const starting = status === 'starting'
@@ -159,6 +163,16 @@ export function ControlPanel({
 
       <section className="control-block">
         <h2>声音</h2>
+        <button
+          className="secondary-button full-width-button"
+          type="button"
+          onClick={onUnlockAudioOutput}
+        >
+          解锁/测试声音
+        </button>
+        <p className="meta-line">
+          输出：{audioOutputStateLabel(audioOutputState)}。麦克风只做分析，不会回放到扬声器。
+        </p>
         <div className="quality-grid" role="group" aria-label="Harmony mode">
           {HARMONY_CONTROL_MODES.map((mode) => (
             <button
@@ -356,4 +370,20 @@ export function ControlPanel({
       </section>
     </aside>
   )
+}
+
+function audioOutputStateLabel(state: ControlPanelProps['audioOutputState']) {
+  if (state === 'ready') {
+    return '已解锁'
+  }
+
+  if (state === 'locked') {
+    return '浏览器锁定'
+  }
+
+  if (state === 'unavailable') {
+    return '不可用'
+  }
+
+  return '未启动'
 }
