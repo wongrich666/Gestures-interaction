@@ -12,6 +12,7 @@ import type {
   CameraQuality,
   DebugMetrics,
   HarmonyControls,
+  LiquidControls,
   ParticleControls,
   RuntimeStatus,
   VisualStyle,
@@ -29,6 +30,7 @@ type ControlPanelProps = {
   cameraQuality: CameraQuality
   synthVolume: number
   harmonyControls: HarmonyControls
+  liquidControls: LiquidControls
   particleControls: ParticleControls
   debug: DebugMetrics
   emotion: AudioEmotion
@@ -38,6 +40,7 @@ type ControlPanelProps = {
   onCameraQualityChange: (quality: CameraQuality) => void
   onSynthVolumeChange: (volume: number) => void
   onHarmonyControlsChange: (controls: HarmonyControls) => void
+  onLiquidControlsChange: (controls: LiquidControls) => void
   onParticleControlsChange: (controls: ParticleControls) => void
 }
 
@@ -57,6 +60,7 @@ export function ControlPanel({
   cameraQuality,
   synthVolume,
   harmonyControls,
+  liquidControls,
   particleControls,
   debug,
   emotion,
@@ -66,9 +70,11 @@ export function ControlPanel({
   onCameraQualityChange,
   onSynthVolumeChange,
   onHarmonyControlsChange,
+  onLiquidControlsChange,
   onParticleControlsChange,
 }: ControlPanelProps) {
   const starting = status === 'starting'
+  const hasLiquidControls = visualStyle === 'liquid' || visualStyle === 'crystal'
   const cameraOptions = Object.entries(CAMERA_QUALITY_PRESETS) as Array<
     [CameraQuality, (typeof CAMERA_QUALITY_PRESETS)[CameraQuality]]
   >
@@ -258,6 +264,66 @@ export function ControlPanel({
           ))}
         </div>
       </section>
+
+      {hasLiquidControls ? (
+        <section className="control-block">
+          <h2>液化参数</h2>
+          <label className="slider-field">
+            <span>
+              强度 <b>{liquidControls.intensity.toFixed(2)}</b>
+            </span>
+            <input
+              type="range"
+              min={0.1}
+              max={3}
+              step={0.05}
+              value={liquidControls.intensity}
+              onChange={(event) =>
+                onLiquidControlsChange({
+                  ...liquidControls,
+                  intensity: Number(event.currentTarget.value),
+                })
+              }
+            />
+          </label>
+          <label className="slider-field">
+            <span>
+              半径 <b>{liquidControls.radius.toFixed(2)}</b>
+            </span>
+            <input
+              type="range"
+              min={0.2}
+              max={4}
+              step={0.05}
+              value={liquidControls.radius}
+              onChange={(event) =>
+                onLiquidControlsChange({
+                  ...liquidControls,
+                  radius: Number(event.currentTarget.value),
+                })
+              }
+            />
+          </label>
+          <label className="slider-field">
+            <span>
+              衰减 <b>{liquidControls.decay.toFixed(3)}</b>
+            </span>
+            <input
+              type="range"
+              min={0.85}
+              max={0.995}
+              step={0.001}
+              value={liquidControls.decay}
+              onChange={(event) =>
+                onLiquidControlsChange({
+                  ...liquidControls,
+                  decay: Number(event.currentTarget.value),
+                })
+              }
+            />
+          </label>
+        </section>
+      ) : null}
 
       <section className="control-block">
         <h2>音乐情绪</h2>

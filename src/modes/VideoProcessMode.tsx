@@ -5,7 +5,12 @@ import {
   summarizeEmotionTimeline,
 } from '../audio/audioEmotion'
 import { analyzeEmotionWithQwen, findLocalQwenModel } from '../audio/ollamaEmotion'
-import { EMPTY_AUDIO_FEATURES, VISUAL_STYLES, VISUAL_STYLE_LABELS } from '../core/config'
+import {
+  DEFAULT_LIQUID_CONTROLS,
+  EMPTY_AUDIO_FEATURES,
+  VISUAL_STYLES,
+  VISUAL_STYLE_LABELS,
+} from '../core/config'
 import { landmarkDistance, midpoint, normalizeVector } from '../core/math'
 import type {
   AudioTimelineFrame,
@@ -14,6 +19,7 @@ import type {
   GestureFrame,
   GestureSnapshot,
   HandData,
+  LiquidControls,
   VideoProcessingStatus,
   VideoTimelines,
   VisualStyle,
@@ -59,6 +65,7 @@ export function VideoProcessMode() {
   const [currentTime, setCurrentTime] = useState(0)
   const [progress, setProgress] = useState(0)
   const [visualStyle, setVisualStyleState] = useState<VisualStyle>('aurora')
+  const [liquidControls, setLiquidControls] = useState<LiquidControls>(DEFAULT_LIQUID_CONTROLS)
   const [timelines, setTimelinesState] = useState<VideoTimelines | null>(null)
   const [failedFrames, setFailedFrames] = useState(0)
   const [debugFrame, setDebugFrame] = useState<GestureFrame | null>(null)
@@ -75,6 +82,13 @@ export function VideoProcessMode() {
   const setVisualStyle = useCallback((nextStyle: VisualStyle) => {
     visualStyleRef.current = nextStyle
     setVisualStyleState(nextStyle)
+
+    if (nextStyle === 'liquid' || nextStyle === 'crystal') {
+      setLiquidControls((controls) => ({
+        ...controls,
+        mode: nextStyle,
+      }))
+    }
   }, [])
 
   const setTimelines = useCallback((nextTimelines: VideoTimelines | null) => {
@@ -133,11 +147,12 @@ export function VideoProcessMode() {
       gesture,
       audio: audioFrame ?? EMPTY_AUDIO_FEATURES,
       emotion: audioFrame?.emotion ?? createDefaultEmotion(),
+      liquidControls,
       visualStyle: visualStyleRef.current,
       now,
       mirrored: false,
     })
-  }, [])
+  }, [liquidControls])
 
   const runPreviewLoop = useCallback(
     (now: number) => {
@@ -604,6 +619,64 @@ export function VideoProcessMode() {
               </button>
             ))}
           </div>
+          {(visualStyle === 'liquid' || visualStyle === 'crystal') ? (
+            <div className="button-stack">
+              <label className="slider-field">
+                <span>
+                  强度 <b>{liquidControls.intensity.toFixed(2)}</b>
+                </span>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={3}
+                  step={0.05}
+                  value={liquidControls.intensity}
+                  onChange={(event) =>
+                    setLiquidControls((controls) => ({
+                      ...controls,
+                      intensity: Number(event.currentTarget.value),
+                    }))
+                  }
+                />
+              </label>
+              <label className="slider-field">
+                <span>
+                  半径 <b>{liquidControls.radius.toFixed(2)}</b>
+                </span>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={4}
+                  step={0.05}
+                  value={liquidControls.radius}
+                  onChange={(event) =>
+                    setLiquidControls((controls) => ({
+                      ...controls,
+                      radius: Number(event.currentTarget.value),
+                    }))
+                  }
+                />
+              </label>
+              <label className="slider-field">
+                <span>
+                  衰减 <b>{liquidControls.decay.toFixed(3)}</b>
+                </span>
+                <input
+                  type="range"
+                  min={0.85}
+                  max={0.995}
+                  step={0.001}
+                  value={liquidControls.decay}
+                  onChange={(event) =>
+                    setLiquidControls((controls) => ({
+                      ...controls,
+                      decay: Number(event.currentTarget.value),
+                    }))
+                  }
+                />
+              </label>
+            </div>
+          ) : null}
         </section>
 
         <section className="control-block">

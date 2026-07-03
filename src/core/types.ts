@@ -279,6 +279,18 @@ export type VisualStyle =
   | 'aurora'
   | 'ink'
   | 'pulse_grid'
+  | 'liquid'
+  | 'crystal'
+
+export type LiquidMode = 'liquid' | 'crystal'
+
+export type LiquidControls = {
+  enabled: boolean
+  mode: LiquidMode
+  intensity: number
+  radius: number
+  decay: number
+}
 
 export type ParticlePreset =
   | 'nebula'

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, type MutableRefObject } from 'react'
 import { createDefaultEmotion } from '../audio/audioEmotion'
 import { DEFAULT_PARTICLE_CONTROLS, EMPTY_AUDIO_FEATURES, HAND_CONNECTIONS } from '../core/config'
 import { containRect, landmarkToCanvas } from '../core/math'
@@ -10,6 +10,7 @@ import type {
   FaceIntent,
   GestureSnapshot,
   HandData,
+  LiquidControls,
   ParticleControls,
   VisualGesture,
   VisualStyle,
@@ -21,6 +22,7 @@ import {
   drawTopologyNetwork,
   shouldTriggerGestureBurst,
 } from './gestureEffects'
+import { LiquidRealityRenderer } from './liquidRealityRenderer'
 import { ParticleSystem } from './particleSystem'
 import { TrailSystem } from './trailSystem'
 
@@ -33,6 +35,7 @@ export type StageFrame = {
   emotion?: AudioEmotion
   face?: FaceData | null
   faceIntent?: FaceIntent
+  liquidControls?: LiquidControls
   particleControls?: ParticleControls
   visualStyle: VisualStyle
   now: number
@@ -59,6 +62,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const particlesRef = useRef(new ParticleSystem())
     const trailsRef = useRef(new TrailSystem())
+    const liquidRef = useRef<LiquidRealityRenderer | null>(null)
     const lastRenderTimeRef = useRef(0)
     const lastVisualGestureRef = useRef<VisualGesture>('none')
     const burstTimingRef = useRef<BurstTiming>({ pinchAt: -Infinity, gestureAt: -Infinity })
@@ -84,6 +88,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
           frame,
           trailsRef.current,
           particlesRef.current,
+          isLiquidStyle(frame.visualStyle) ? getLiquidRenderer(liquidRef) : liquidRef.current,
           deltaMs,
           lastVisualGestureRef.current,
           burstTimingRef.current,
@@ -93,6 +98,8 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
       reset() {
         particlesRef.current.clear()
         trailsRef.current.clear()
+        liquidRef.current?.dispose()
+        liquidRef.current = null
         lastRenderTimeRef.current = 0
         lastVisualGestureRef.current = 'none'
         burstTimingRef.current = { pinchAt: -Infinity, gestureAt: -Infinity }
@@ -134,6 +141,7 @@ function drawFrame(
   frame: StageFrame,
   trails: TrailSystem,
   particles: ParticleSystem,
+  liquidRenderer: LiquidRealityRenderer | null,
   deltaMs: number,
   previousVisualGesture: VisualGesture,
   burstTiming: BurstTiming,
@@ -154,14 +162,7 @@ function drawFrame(
   const particleControls = frame.particleControls ?? DEFAULT_PARTICLE_CONTROLS
 
   drawBackground(ctx, surface, frame.audio, emotion, frame.now)
-  drawStyledVideo(
-    ctx,
-    frame.video,
-    videoRect,
-    frame.visualStyle,
-    frame.audio.bass,
-    frame.mirrored ?? true,
-  )
+  drawVideoLayer(ctx, frame, videoRect, liquidRenderer)
   drawStageWash(ctx, videoRect, frame.audio, emotion, frame.now)
   drawStyleOverlay(ctx, videoRect, frame.visualStyle, focusPoint, frame.audio, emotion, frame.now)
   drawTopologyNetwork(ctx, videoRect, frame.gesture.topology, emotion, frame.mirrored ?? true)
@@ -247,6 +248,106 @@ function drawFrame(
     frame.mirrored ?? true,
   )
   drawCameraPreview(ctx, surface, frame.video, frame.hands, frame.mirrored ?? true)
+}
+
+function drawVideoLayer(
+  ctx: CanvasRenderingContext2D,
+  frame: StageFrame,
+  videoRect: CanvasRect,
+  liquidRenderer: LiquidRealityRenderer | null,
+) {
+  const mirrored = frame.mirrored ?? true
+
+  if (
+    liquidRenderer &&
+    isLiquidStyle(frame.visualStyle) &&
+    frame.liquidControls?.enabled !== false
+  ) {
+    const fingers = extractFingerUniforms(frame.hands, mirrored)
+    const rendered = liquidRenderer.render({
+      source: frame.video,
+      width: videoRect.width,
+      height: videoRect.height,
+      mirrored,
+      fingers,
+      controls: frame.liquidControls ?? {
+        enabled: true,
+        mode: frame.visualStyle,
+        intensity: 1.35,
+        radius: 1.0,
+        decay: 0.972,
+      },
+      mode: frame.visualStyle,
+      now: frame.now,
+    })
+
+    if (rendered) {
+      ctx.drawImage(rendered, videoRect.x, videoRect.y, videoRect.width, videoRect.height)
+      return
+    }
+
+    const error = liquidRenderer.getError()
+
+    if (error) {
+      drawStyledVideo(ctx, frame.video, videoRect, 'normal', frame.audio.bass, mirrored)
+      drawWebglError(ctx, videoRect, error)
+      return
+    }
+  }
+
+  drawStyledVideo(ctx, frame.video, videoRect, frame.visualStyle, frame.audio.bass, mirrored)
+}
+
+function extractFingerUniforms(hands: HandData[], mirrored: boolean) {
+  const fingers = new Float32Array(30)
+  const tipIndexes = [4, 8, 12, 16, 20]
+  let offset = 0
+
+  for (const hand of hands.slice(0, 2)) {
+    for (const index of tipIndexes) {
+      if (offset >= 30) {
+        break
+      }
+
+      const landmark = hand.landmarks[index]
+      fingers[offset] = mirrored ? 1 - landmark.x : landmark.x
+      fingers[offset + 1] = landmark.y
+      fingers[offset + 2] = 1
+      offset += 3
+    }
+  }
+
+  return fingers
+}
+
+function getLiquidRenderer(ref: MutableRefObject<LiquidRealityRenderer | null>) {
+  if (ref.current) {
+    return ref.current
+  }
+
+  try {
+    ref.current = new LiquidRealityRenderer()
+    return ref.current
+  } catch (error) {
+    console.warn('Liquid renderer unavailable.', error)
+    return null
+  }
+}
+
+function isLiquidStyle(style: VisualStyle) {
+  return style === 'liquid' || style === 'crystal'
+}
+
+function drawWebglError(ctx: CanvasRenderingContext2D, rect: CanvasRect, error: string) {
+  ctx.save()
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.72)'
+  ctx.fillRect(rect.x, rect.y, rect.width, rect.height)
+  ctx.fillStyle = '#ffb8a8'
+  ctx.font = '700 13px system-ui, Segoe UI, sans-serif'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+  ctx.fillText(`WebGL liquid error: ${error.slice(0, 160)}`, rect.x + 16, rect.y + 16)
+  ctx.restore()
 }
 
 function drawBackground(

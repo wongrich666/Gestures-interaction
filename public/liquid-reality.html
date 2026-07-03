@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Liquid Reality</title>
+    <style>
+      :root {
+        color: #f7fbff;
+        background: #05070a;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        touch-action: none;
+      }
+
+      video,
+      canvas {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      video {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      canvas {
+        display: block;
+        touch-action: none;
+      }
+
+      .glass {
+        position: fixed;
+        z-index: 10;
+        color: rgba(248, 252, 255, 0.92);
+        background: rgba(8, 12, 18, 0.48);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 14px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 20px 70px rgba(0, 0, 0, 0.32);
+      }
+
+      .top-actions {
+        top: 14px;
+        right: 14px;
+        display: flex;
+        gap: 8px;
+        padding: 8px;
+      }
+
+      .panel {
+        left: 50%;
+        bottom: 16px;
+        display: grid;
+        width: min(720px, calc(100vw - 28px));
+        gap: 10px;
+        padding: 12px;
+        transform: translateX(-50%);
+      }
+
+      .mode-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .slider-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      button,
+      label {
+        min-height: 38px;
+        color: rgba(248, 252, 255, 0.92);
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 10px;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      button.active {
+        color: #041115;
+        background: linear-gradient(135deg, #8feaff, #e4f27d);
+      }
+
+      label {
+        display: grid;
+        gap: 5px;
+        padding: 8px 10px;
+      }
+
+      label span {
+        display: flex;
+        justify-content: space-between;
+        color: rgba(248, 252, 255, 0.78);
+      }
+
+      input {
+        width: 100%;
+        accent-color: #8feaff;
+      }
+
+      .status {
+        top: 14px;
+        left: 14px;
+        max-width: min(560px, calc(100vw - 28px));
+        padding: 10px 12px;
+        font-size: 13px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+      }
+
+      .hidden-ui .panel,
+      .hidden-ui .top-actions {
+        display: none;
+      }
+
+      .show-ui {
+        right: 14px;
+        bottom: 14px;
+        display: none;
+        padding: 10px 12px;
+      }
+
+      .hidden-ui .show-ui {
+        display: block;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+  </head>
+  <body>
+    <video id="video" playsinline muted></video>
+    <canvas id="stage"></canvas>
+    <div id="status" class="glass status">Initializing Reality...</div>
+    <div class="glass top-actions">
+      <button id="switchCam" type="button">SWITCH CAM</button>
+      <button id="hideUi" type="button">HIDE UI</button>
+    </div>
+    <button id="showUi" class="glass show-ui" type="button">UI</button>
+    <div class="glass panel">
+      <div class="mode-row">
+        <button id="liquidBtn" class="active" type="button">LIQUID</button>
+        <button id="crystalBtn" type="button">CRYSTAL</button>
+      </div>
+      <div class="slider-row">
+        <label>
+          <span>INTENSITY <b id="intensityValue">1.35</b></span>
+          <input id="intensity" type="range" min="0.1" max="3.0" step="0.05" value="1.35" />
+        </label>
+        <label>
+          <span>RADIUS <b id="radiusValue">1.00</b></span>
+          <input id="radius" type="range" min="0.2" max="4.0" step="0.05" value="1.00" />
+        </label>
+        <label>
+          <span>DECAY <b id="decayValue">0.972</b></span>
+          <input id="decay" type="range" min="0.85" max="0.995" step="0.001" value="0.972" />
+        </label>
+      </div>
+    </div>
+    <script>
+      const FINGER_FLOATS = 30;
+      const tipIndexes = [4, 8, 12, 16, 20];
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('stage');
+      const statusEl = document.getElementById('status');
+      const fingers = new Float32Array(FINGER_FLOATS);
+      let facingMode = 'user';
+      let mode = 0;
+      let stream = null;
+      let hands = null;
+      let busy = false;
+      let renderer = null;
+      const controls = {
+        intensity: 1.35,
+        radius: 1.0,
+        decay: 0.972,
+      };
+
+      canvas.addEventListener('pointerdown', (event) => event.preventDefault());
+      document.getElementById('liquidBtn').addEventListener('click', () => setMode(0));
+      document.getElementById('crystalBtn').addEventListener('click', () => setMode(1));
+      document.getElementById('switchCam').addEventListener('click', () => switchCamera());
+      document.getElementById('hideUi').addEventListener('click', () => setUiHidden(true));
+      document.getElementById('showUi').addEventListener('click', () => setUiHidden(false));
+      window.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() === 'h') {
+          setUiHidden(!document.body.classList.contains('hidden-ui'));
+        }
+      });
+
+      bindSlider('intensity', 'intensityValue', 'intensity', 2);
+      bindSlider('radius', 'radiusValue', 'radius', 2);
+      bindSlider('decay', 'decayValue', 'decay', 3);
+
+      async function init() {
+        renderer = new LiquidRenderer(canvas);
+        setupHands();
+        await startCamera();
+        statusEl.textContent = 'Reality Online';
+        requestAnimationFrame(loop);
+      }
+
+      function bindSlider(id, labelId, key, digits) {
+        const input = document.getElementById(id);
+        const label = document.getElementById(labelId);
+        input.addEventListener('input', () => {
+          controls[key] = Number(input.value);
+          label.textContent = controls[key].toFixed(digits);
+        });
+      }
+
+      function setMode(nextMode) {
+        mode = nextMode;
+        document.getElementById('liquidBtn').classList.toggle('active', mode === 0);
+        document.getElementById('crystalBtn').classList.toggle('active', mode === 1);
+      }
+
+      function setUiHidden(hidden) {
+        document.body.classList.toggle('hidden-ui', hidden);
+      }
+
+      async function switchCamera() {
+        facingMode = facingMode === 'user' ? 'environment' : 'user';
+        await startCamera();
+      }
+
+      async function startCamera() {
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop());
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+        video.srcObject = stream;
+        await video.play();
+      }
+
+      function setupHands() {
+        if (!window.Hands) {
+          throw new Error('MediaPipe Hands failed to load.');
+        }
+
+        hands = new window.Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`,
+        });
+        hands.setOptions({
+          maxNumHands: 2,
+          modelComplexity: 0,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+        hands.onResults((results) => {
+          fingers.fill(0);
+          let cursor = 0;
+
+          for (const hand of (results.multiHandLandmarks || []).slice(0, 2)) {
+            for (const index of tipIndexes) {
+              const point = hand[index];
+              const mapped = videoToScreen(point.x, point.y);
+              fingers[cursor] = mapped.x;
+              fingers[cursor + 1] = mapped.y;
+              fingers[cursor + 2] = 1;
+              cursor += 3;
+            }
+          }
+        });
+      }
+
+      function videoToScreen(rawX, rawY) {
+        const canvasAspect = canvas.width / Math.max(1, canvas.height);
+        const videoAspect = video.videoWidth / Math.max(1, video.videoHeight);
+        let displayWidth;
+        let displayHeight;
+
+        if (canvasAspect > videoAspect) {
+          displayWidth = canvas.width;
+          displayHeight = canvas.width / videoAspect;
+        } else {
+          displayHeight = canvas.height;
+          displayWidth = canvas.height * videoAspect;
+        }
+
+        const videoScaleX = canvas.width / displayWidth;
+        const videoScaleY = canvas.height / displayHeight;
+        let x = (rawX - 0.5) / videoScaleX + 0.5;
+        const y = (rawY - 0.5) / videoScaleY + 0.5;
+
+        if (facingMode === 'user') {
+          x = 1 - x;
+        }
+
+        return { x, y };
+      }
+
+      async function loop(now) {
+        resize();
+
+        if (hands && !busy && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          busy = true;
+          hands.send({ image: video }).catch(showError).finally(() => {
+            busy = false;
+          });
+        }
+
+        try {
+          renderer.render({
+            source: video,
+            fingers,
+            intensity: controls.intensity,
+            radius: controls.radius,
+            decay: controls.decay,
+            mode,
+            mirrored: facingMode === 'user',
+            now,
+          });
+        } catch (error) {
+          showError(error);
+        }
+        requestAnimationFrame(loop);
+      }
+
+      function resize() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const width = Math.max(2, Math.floor(window.innerWidth * dpr));
+        const height = Math.max(2, Math.floor(window.innerHeight * dpr));
+
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+        }
+      }
+
+      function showError(error) {
+        statusEl.textContent = error && error.message ? error.message : String(error);
+        statusEl.style.color = '#ffb8a8';
+      }
+
+      class LiquidRenderer {
+        constructor(canvas) {
+          this.canvas = canvas;
+          const gl = canvas.getContext('webgl', {
+            alpha: false,
+            depth: false,
+            stencil: false,
+            antialias: false,
+          });
+
+          if (!gl) {
+            throw new Error('WebGL1 is not available.');
+          }
+
+          this.gl = gl;
+          this.quad = createQuad(gl);
+          this.videoTexture = createTexture(gl, 1, 1, null, gl.LINEAR);
+          this.simProgram = createProgram(gl, vertexShader, simShader, [
+            'uCurr',
+            'uPrev',
+            'uTexel',
+            'uAspect',
+            'uFingers',
+            'uPrevFingers',
+            'uRadius',
+            'uDamping',
+            'uTime',
+          ]);
+          this.renderProgram = createProgram(gl, vertexShader, renderShader, [
+            'uVideo',
+            'uWave',
+            'uTexel',
+            'uAspect',
+            'uIntensity',
+            'uMode',
+            'uMirrored',
+          ]);
+          this.targets = [];
+          this.index = 0;
+          this.width = 0;
+          this.height = 0;
+          this.prevFingers = new Float32Array(FINGER_FLOATS);
+        }
+
+        render(options) {
+          this.ensureSize(this.canvas.width, this.canvas.height);
+          this.uploadVideo(options.source);
+          this.step(options);
+          this.draw(options);
+          this.prevFingers.set(options.fingers);
+        }
+
+        ensureSize(width, height) {
+          if (this.width === width && this.height === height && this.targets.length === 3) {
+            return;
+          }
+
+          const gl = this.gl;
+          this.width = width;
+          this.height = height;
+          this.simWidth = Math.max(2, Math.floor(width * 0.5));
+          this.simHeight = Math.max(2, Math.floor(height * 0.5));
+          this.targets.forEach((target) => {
+            gl.deleteTexture(target.texture);
+            gl.deleteFramebuffer(target.framebuffer);
+          });
+          this.targets = [
+            createTarget(gl, this.simWidth, this.simHeight),
+            createTarget(gl, this.simWidth, this.simHeight),
+            createTarget(gl, this.simWidth, this.simHeight),
+          ];
+          this.index = 0;
+
+          this.targets.forEach((target) => {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+            gl.viewport(0, 0, this.simWidth, this.simHeight);
+            gl.clearColor(0.5, 0.5, 0.5, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          });
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+
+        uploadVideo(source) {
+          const gl = this.gl;
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, this.videoTexture);
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+        }
+
+        step(options) {
+          const gl = this.gl;
+          const prev = this.targets[this.index];
+          const curr = this.targets[(this.index + 1) % 3];
+          const next = this.targets[(this.index + 2) % 3];
+          this.index = (this.index + 1) % 3;
+          gl.useProgram(this.simProgram.program);
+          bindQuad(gl, this.quad, this.simProgram);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, next.framebuffer);
+          gl.viewport(0, 0, this.simWidth, this.simHeight);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, curr.texture);
+          gl.uniform1i(this.simProgram.uniforms.uCurr, 0);
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, prev.texture);
+          gl.uniform1i(this.simProgram.uniforms.uPrev, 1);
+          gl.uniform2f(this.simProgram.uniforms.uTexel, 1 / this.simWidth, 1 / this.simHeight);
+          gl.uniform1f(this.simProgram.uniforms.uAspect, this.width / Math.max(1, this.height));
+          gl.uniform3fv(this.simProgram.uniforms.uFingers, options.fingers);
+          gl.uniform3fv(this.simProgram.uniforms.uPrevFingers, this.prevFingers);
+          gl.uniform1f(this.simProgram.uniforms.uRadius, options.radius);
+          gl.uniform1f(this.simProgram.uniforms.uDamping, options.decay);
+          gl.uniform1f(this.simProgram.uniforms.uTime, options.now * 0.001);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        draw(options) {
+          const gl = this.gl;
+          const wave = this.targets[(this.index + 1) % 3];
+          gl.useProgram(this.renderProgram.program);
+          bindQuad(gl, this.quad, this.renderProgram);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, this.width, this.height);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, this.videoTexture);
+          gl.uniform1i(this.renderProgram.uniforms.uVideo, 0);
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, wave.texture);
+          gl.uniform1i(this.renderProgram.uniforms.uWave, 1);
+          gl.uniform2f(this.renderProgram.uniforms.uTexel, 1 / this.simWidth, 1 / this.simHeight);
+          gl.uniform1f(this.renderProgram.uniforms.uAspect, this.width / Math.max(1, this.height));
+          gl.uniform1f(this.renderProgram.uniforms.uIntensity, options.intensity);
+          gl.uniform1f(this.renderProgram.uniforms.uMode, options.mode);
+          gl.uniform1f(this.renderProgram.uniforms.uMirrored, options.mirrored ? 1 : 0);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+      }
+
+      const vertexShader = `
+attribute vec2 aPosition;
+varying vec2 vUv;
+void main() {
+  vUv = aPosition * 0.5 + 0.5;
+  gl_Position = vec4(aPosition, 0.0, 1.0);
+}`;
+
+      const simShader = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uCurr;
+uniform sampler2D uPrev;
+uniform vec2 uTexel;
+uniform float uAspect;
+uniform vec3 uFingers[10];
+uniform vec3 uPrevFingers[10];
+uniform float uRadius;
+uniform float uDamping;
+uniform float uTime;
+float h(sampler2D tex, vec2 uv) { return texture2D(tex, uv).r * 2.0 - 1.0; }
+float enc(float v) { return v * 0.5 + 0.5; }
+float rand(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float capsule(vec2 p, vec2 a, vec2 b, float r) {
+  vec2 pa = p - a;
+  vec2 ba = b - a;
+  float q = clamp(dot(pa, ba) / max(dot(ba, ba), 0.00001), 0.0, 1.0);
+  return length(pa - ba * q) - r;
+}
+void main() {
+  float cur = h(uCurr, vUv);
+  float prev = h(uPrev, vUv);
+  float avg =
+    h(uCurr, vUv + vec2(uTexel.x, 0.0)) * 0.2 +
+    h(uCurr, vUv - vec2(uTexel.x, 0.0)) * 0.2 +
+    h(uCurr, vUv + vec2(0.0, uTexel.y)) * 0.2 +
+    h(uCurr, vUv - vec2(0.0, uTexel.y)) * 0.2 +
+    h(uCurr, vUv + vec2(uTexel.x, uTexel.y)) * 0.05 +
+    h(uCurr, vUv + vec2(-uTexel.x, uTexel.y)) * 0.05 +
+    h(uCurr, vUv + vec2(uTexel.x, -uTexel.y)) * 0.05 +
+    h(uCurr, vUv - vec2(uTexel.x, uTexel.y)) * 0.05;
+  float val = avg * 2.0 - prev;
+  float ampFactor = 1.0 - smoothstep(0.0, 0.08, abs(val)) * 0.006;
+  val *= uDamping * ampFactor;
+  val += (rand(vUv * 173.31 + uTime * 0.07) - 0.5) * 0.00035;
+  vec2 aspect = vec2(uAspect, 1.0);
+  vec2 pos = (vUv - 0.5) * aspect;
+  float radius = 0.038 * uRadius;
+  float impulse = 0.0;
+  for (int i = 0; i < 10; i++) {
+    vec3 f = uFingers[i];
+    vec3 pf = uPrevFingers[i];
+    if (f.z > 0.5) {
+      vec2 a = ((pf.z > 0.5 ? pf.xy : f.xy) - 0.5) * aspect;
+      vec2 b = (f.xy - 0.5) * aspect;
+      float d = capsule(pos, a, b, radius);
+      float vel = length((b - a) / aspect) * 1000.0;
+      float force = 0.6 + clamp(vel * 0.012, 0.0, 1.2);
+      impulse += smoothstep(radius, -radius * 0.55, d) * force;
+    }
+  }
+  val += clamp(impulse, 0.0, 1.8) * 0.055;
+  gl_FragColor = vec4(enc(clamp(val, -0.98, 0.98)), enc(cur), 0.5, 1.0);
+}`;
+
+      const renderShader = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uVideo;
+uniform sampler2D uWave;
+uniform vec2 uTexel;
+uniform float uAspect;
+uniform float uIntensity;
+uniform float uMode;
+uniform float uMirrored;
+float h(vec2 uv) { return texture2D(uWave, uv).r * 2.0 - 1.0; }
+vec3 videoAt(vec2 uv) {
+  vec2 p = clamp(uv, 0.001, 0.999);
+  p.x = mix(p.x, 1.0 - p.x, step(0.5, uMirrored));
+  return texture2D(uVideo, p).rgb;
+}
+vec3 soft(vec2 uv, vec2 off) {
+  return videoAt(uv + off) * 0.58 + videoAt(uv + off * 0.55) * 0.28 + videoAt(uv + off * 1.25) * 0.14;
+}
+void main() {
+  float tl = h(vUv + vec2(-uTexel.x, uTexel.y));
+  float tc = h(vUv + vec2(0.0, uTexel.y));
+  float tr = h(vUv + vec2(uTexel.x, uTexel.y));
+  float ml = h(vUv - vec2(uTexel.x, 0.0));
+  float mc = h(vUv);
+  float mr = h(vUv + vec2(uTexel.x, 0.0));
+  float bl = h(vUv - vec2(uTexel.x, uTexel.y));
+  float bc = h(vUv - vec2(0.0, uTexel.y));
+  float br = h(vUv + vec2(uTexel.x, -uTexel.y));
+  vec2 grad = vec2((tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl), (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr));
+  float lap = ((ml + mr + tc + bc) * 0.25) - mc;
+  float gradLen = length(grad);
+  vec2 aspect = vec2(1.0 / max(uAspect, 0.001), 1.0);
+  vec2 safeGrad = gradLen > 0.0001 ? grad / gradLen : vec2(0.0);
+  vec2 total = grad * 0.55 * uIntensity * aspect + safeGrad * lap * 0.18 * uIntensity * aspect;
+  float dispersion = 0.015 + clamp(gradLen * 0.20, 0.0, 0.14);
+  vec3 liquid;
+  liquid.r = soft(vUv, total * (1.0 + dispersion)).r;
+  liquid.g = soft(vUv, total).g;
+  liquid.b = soft(vUv, total * (1.0 - dispersion)).b;
+  liquid *= 1.0 + clamp(mc * 2.2, -0.38, 0.45);
+  liquid = mix(liquid, liquid * vec3(1.06, 1.02, 0.94), smoothstep(0.02, 0.12, mc));
+  liquid = mix(liquid, liquid * vec3(0.78, 0.90, 1.08), smoothstep(0.02, 0.12, -mc));
+  vec3 normal = normalize(vec3(-grad.x, -grad.y, 0.8 / (uIntensity + 0.01)));
+  vec3 viewDir = vec3(0.0, 0.0, 1.0);
+  float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(normal, viewDir), 0.0, 1.0), 5.0);
+  liquid = mix(liquid, videoAt(vUv - total * 1.6) * vec3(0.68, 0.84, 1.08), fresnel * 0.32);
+  vec3 lightDir = normalize(vec3(0.4, 0.7, 1.0));
+  vec3 halfDir = normalize(lightDir + viewDir);
+  float ndoth = max(dot(normal, halfDir), 0.0);
+  float caustic = smoothstep(0.04, 0.10, mc) * smoothstep(0.01, 0.06, lap);
+  liquid += vec3(1.0, 0.94, 0.78) * (pow(ndoth, 180.0) * 2.2 + pow(ndoth, 28.0) * 0.35 + caustic * 0.55);
+  liquid = mix(liquid * vec3(0.88, 0.94, 1.04), liquid, smoothstep(0.006, 0.05, gradLen));
+  vec2 facet = floor(grad * 18.0) / 18.0;
+  vec3 crystal = videoAt(vUv + facet * 0.7 * uIntensity * aspect);
+  vec2 facetR = floor(vec2(mr - mc, tr - mc) * 18.0) / 18.0;
+  vec2 facetU = floor(vec2(tc - mc, tr - mc) * 18.0) / 18.0;
+  float edge = step(0.018, length(facetR - facet) + length(facetU - facet));
+  crystal *= 0.86 + dot(normalize(vec3(facet, 0.38)), lightDir) * 0.34;
+  crystal += vec3(0.75, 0.90, 1.0) * edge * (0.22 + gradLen * 1.4);
+  gl_FragColor = vec4(clamp(mix(liquid, crystal, step(0.5, uMode)), 0.0, 1.0), 1.0);
+}`;
+
+      function createQuad(gl) {
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+        return buffer;
+      }
+
+      function createProgram(gl, vertexSource, fragmentSource, uniformNames) {
+        const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
+        const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
+        const program = gl.createProgram();
+        gl.attachShader(program, vertex);
+        gl.attachShader(program, fragment);
+        gl.bindAttribLocation(program, 0, 'aPosition');
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          throw new Error(gl.getProgramInfoLog(program));
+        }
+        const uniforms = {};
+        uniformNames.forEach((name) => {
+          uniforms[name] = gl.getUniformLocation(program, name);
+        });
+        return { program, uniforms, position: 0 };
+      }
+
+      function compile(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          throw new Error(gl.getShaderInfoLog(shader));
+        }
+        return shader;
+      }
+
+      function createTexture(gl, width, height, data, filter) {
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        return texture;
+      }
+
+      function createTarget(gl, width, height) {
+        const texture = createTexture(gl, width, height, null, gl.LINEAR);
+        const framebuffer = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (status !== gl.FRAMEBUFFER_COMPLETE) {
+          throw new Error(`FBO incomplete: 0x${status.toString(16)}`);
+        }
+        return { texture, framebuffer };
+      }
+
+      function bindQuad(gl, buffer, info) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.enableVertexAttribArray(info.position);
+        gl.vertexAttribPointer(info.position, 2, gl.FLOAT, false, 0, 0);
+      }
+
+      init().catch(showError);
+    </script>
+  </body>
+</html>

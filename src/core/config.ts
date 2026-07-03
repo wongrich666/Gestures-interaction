@@ -4,6 +4,7 @@ import type {
   HarmonyControlMode,
   HarmonyControls,
   HarmonyFamily,
+  LiquidControls,
   ParticleControls,
   ParticlePreset,
   PlayableHarmonyFamily,
@@ -77,6 +78,14 @@ export const DEFAULT_HARMONY_CONTROLS: HarmonyControls = {
   activeNotes: 4,
 }
 
+export const DEFAULT_LIQUID_CONTROLS: LiquidControls = {
+  enabled: true,
+  mode: 'liquid',
+  intensity: 1.35,
+  radius: 1.0,
+  decay: 0.972,
+}
+
 export const PARTICLE_PRESETS: ParticlePreset[] = [
   'nebula',
   'heart',
@@ -110,6 +119,8 @@ export const VISUAL_STYLES: VisualStyle[] = [
   'aurora',
   'ink',
   'pulse_grid',
+  'liquid',
+  'crystal',
 ]
 
 export const VISUAL_STYLE_LABELS: Record<VisualStyle, string> = {
@@ -121,6 +132,8 @@ export const VISUAL_STYLE_LABELS: Record<VisualStyle, string> = {
   aurora: '情绪光场',
   ink: '墨迹',
   pulse_grid: '节拍网格',
+  liquid: '现实液化',
+  crystal: '晶体折射',
 }
 
 export const HAND_CONNECTIONS: Array<readonly [number, number]> = [

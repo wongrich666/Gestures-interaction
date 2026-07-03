@@ -4,6 +4,7 @@ import { TopologySynthEngine } from '../audio/synthEngine'
 import {
   DEFAULT_CAMERA_QUALITY,
   DEFAULT_HARMONY_CONTROLS,
+  DEFAULT_LIQUID_CONTROLS,
   DEFAULT_PARTICLE_CONTROLS,
   EMPTY_AUDIO_FEATURES,
   HARMONY_FAMILY_LABELS,
@@ -19,6 +20,7 @@ import type {
   HandData,
   HarmonyControls,
   HarmonyState,
+  LiquidControls,
   ParticleControls,
   RuntimeStatus,
   VisualStyle,
@@ -74,6 +76,7 @@ export function RealtimeMode() {
   const synthVolumeRef = useRef(DEFAULT_SYNTH_VOLUME)
   const harmonyControlsRef = useRef<HarmonyControls>(DEFAULT_HARMONY_CONTROLS)
   const lastPlayableHarmonyRef = useRef<HarmonyState | null>(null)
+  const liquidControlsRef = useRef<LiquidControls>(DEFAULT_LIQUID_CONTROLS)
   const particleControlsRef = useRef<ParticleControls>(DEFAULT_PARTICLE_CONTROLS)
   const emotionRef = useRef<AudioEmotion>(createDefaultEmotion())
   const gestureEngineRef = useRef(new GestureEngine())
@@ -91,6 +94,9 @@ export function RealtimeMode() {
   const [synthVolume, setSynthVolume] = useState(DEFAULT_SYNTH_VOLUME)
   const [harmonyControls, setHarmonyControls] = useState<HarmonyControls>(
     DEFAULT_HARMONY_CONTROLS,
+  )
+  const [liquidControls, setLiquidControls] = useState<LiquidControls>(
+    DEFAULT_LIQUID_CONTROLS,
   )
   const [particleControls, setParticleControls] = useState<ParticleControls>(
     DEFAULT_PARTICLE_CONTROLS,
@@ -116,8 +122,23 @@ export function RealtimeMode() {
   }, [harmonyControls])
 
   useEffect(() => {
+    liquidControlsRef.current = liquidControls
+  }, [liquidControls])
+
+  useEffect(() => {
     particleControlsRef.current = particleControls
   }, [particleControls])
+
+  const handleVisualStyleChange = useCallback((nextStyle: VisualStyle) => {
+    setVisualStyle(nextStyle)
+
+    if (nextStyle === 'liquid' || nextStyle === 'crystal') {
+      setLiquidControls((controls) => ({
+        ...controls,
+        mode: nextStyle,
+      }))
+    }
+  }, [])
 
   const releaseResources = useCallback(() => {
     if (animationFrameRef.current !== null) {
@@ -296,6 +317,7 @@ export function RealtimeMode() {
           emotion: nextEmotion,
           face,
           faceIntent,
+          liquidControls: liquidControlsRef.current,
           particleControls: particleControlsRef.current,
           visualStyle: visualStyleRef.current,
           now,
@@ -424,15 +446,17 @@ export function RealtimeMode() {
         cameraQuality={cameraQuality}
         synthVolume={synthVolume}
         harmonyControls={harmonyControls}
+        liquidControls={liquidControls}
         debug={debug}
         emotion={emotion}
         particleControls={particleControls}
         onStart={startRealtime}
         onStop={stopRealtime}
-        onVisualStyleChange={setVisualStyle}
+        onVisualStyleChange={handleVisualStyleChange}
         onCameraQualityChange={setCameraQuality}
         onSynthVolumeChange={setSynthVolume}
         onHarmonyControlsChange={setHarmonyControls}
+        onLiquidControlsChange={setLiquidControls}
         onParticleControlsChange={setParticleControls}
       />
     </main>
