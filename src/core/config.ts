@@ -1,8 +1,12 @@
 import type {
   AudioFeatures,
   CameraQuality,
+  HarmonyControlMode,
+  HarmonyControls,
+  HarmonyFamily,
   ParticleControls,
   ParticlePreset,
+  PlayableHarmonyFamily,
   VisualStyle,
 } from './types'
 
@@ -36,6 +40,41 @@ export const DEFAULT_PARTICLE_CONTROLS: ParticleControls = {
   spread: 1,
   color: '#5ee4ff',
   customShape: [],
+}
+
+export const HARMONY_CONTROL_MODES: HarmonyControlMode[] = ['auto', 'sustain', 'manual']
+
+export const HARMONY_MODE_LABELS: Record<HarmonyControlMode, string> = {
+  auto: '自动',
+  sustain: '持续',
+  manual: '手动',
+}
+
+export const HARMONY_FAMILY_LABELS: Record<HarmonyFamily, string> = {
+  silent: '静音',
+  major: '大三和声',
+  minor: '小三和声',
+  sus: '挂留和声',
+  diminished: '减七变化',
+  augmented: '增六变化',
+  cluster: '多音簇',
+}
+
+export const PLAYABLE_HARMONY_FAMILIES: PlayableHarmonyFamily[] = [
+  'major',
+  'minor',
+  'sus',
+  'diminished',
+  'augmented',
+  'cluster',
+]
+
+export const DEFAULT_HARMONY_CONTROLS: HarmonyControls = {
+  mode: 'auto',
+  family: 'major',
+  brightness: 0.66,
+  dissonance: 0.16,
+  activeNotes: 4,
 }
 
 export const PARTICLE_PRESETS: ParticlePreset[] = ['nebula', 'heart', 'sphere', 'ring', 'custom']

@@ -1,8 +1,17 @@
-import { CAMERA_QUALITY_PRESETS, VISUAL_STYLES, VISUAL_STYLE_LABELS } from '../core/config'
+import {
+  CAMERA_QUALITY_PRESETS,
+  HARMONY_CONTROL_MODES,
+  HARMONY_FAMILY_LABELS,
+  HARMONY_MODE_LABELS,
+  PLAYABLE_HARMONY_FAMILIES,
+  VISUAL_STYLES,
+  VISUAL_STYLE_LABELS,
+} from '../core/config'
 import type {
   AudioEmotion,
   CameraQuality,
   DebugMetrics,
+  HarmonyControls,
   ParticleControls,
   RuntimeStatus,
   VisualStyle,
@@ -19,6 +28,7 @@ type ControlPanelProps = {
   visualStyle: VisualStyle
   cameraQuality: CameraQuality
   synthVolume: number
+  harmonyControls: HarmonyControls
   particleControls: ParticleControls
   debug: DebugMetrics
   emotion: AudioEmotion
@@ -27,6 +37,7 @@ type ControlPanelProps = {
   onVisualStyleChange: (style: VisualStyle) => void
   onCameraQualityChange: (quality: CameraQuality) => void
   onSynthVolumeChange: (volume: number) => void
+  onHarmonyControlsChange: (controls: HarmonyControls) => void
   onParticleControlsChange: (controls: ParticleControls) => void
 }
 
@@ -45,6 +56,7 @@ export function ControlPanel({
   visualStyle,
   cameraQuality,
   synthVolume,
+  harmonyControls,
   particleControls,
   debug,
   emotion,
@@ -53,6 +65,7 @@ export function ControlPanel({
   onVisualStyleChange,
   onCameraQualityChange,
   onSynthVolumeChange,
+  onHarmonyControlsChange,
   onParticleControlsChange,
 }: ControlPanelProps) {
   const starting = status === 'starting'
@@ -120,6 +133,96 @@ export function ControlPanel({
 
       <section className="control-block">
         <h2>声音</h2>
+        <div className="quality-grid" role="group" aria-label="Harmony mode">
+          {HARMONY_CONTROL_MODES.map((mode) => (
+            <button
+              className={mode === harmonyControls.mode ? 'style-button active' : 'style-button'}
+              key={mode}
+              type="button"
+              onClick={() => onHarmonyControlsChange({ ...harmonyControls, mode })}
+            >
+              {HARMONY_MODE_LABELS[mode]}
+            </button>
+          ))}
+        </div>
+        <p className="meta-line">
+          {harmonyControls.mode === 'auto'
+            ? '由指尖拓扑自动决定和声，手势不足时静音。'
+            : harmonyControls.mode === 'sustain'
+              ? '手势不足时保留上一次非静音和声。'
+              : '直接使用下面选择的和声，不受当前静音状态限制。'}
+        </p>
+        <div className="style-grid" role="group" aria-label="Manual harmony family">
+          {PLAYABLE_HARMONY_FAMILIES.map((family) => (
+            <button
+              className={family === harmonyControls.family ? 'style-button active' : 'style-button'}
+              disabled={harmonyControls.mode !== 'manual'}
+              key={family}
+              type="button"
+              onClick={() => onHarmonyControlsChange({ ...harmonyControls, family })}
+              title={harmonyControls.mode !== 'manual' ? '切到手动模式后可选择和声' : undefined}
+            >
+              {HARMONY_FAMILY_LABELS[family]}
+            </button>
+          ))}
+        </div>
+        <label className="slider-field">
+          <span>
+            手动亮度 <b>{Math.round(harmonyControls.brightness * 100)}%</b>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            disabled={harmonyControls.mode !== 'manual'}
+            value={Math.round(harmonyControls.brightness * 100)}
+            onChange={(event) =>
+              onHarmonyControlsChange({
+                ...harmonyControls,
+                brightness: Number(event.currentTarget.value) / 100,
+              })
+            }
+          />
+        </label>
+        <label className="slider-field">
+          <span>
+            手动张力 <b>{Math.round(harmonyControls.dissonance * 100)}%</b>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            disabled={harmonyControls.mode !== 'manual'}
+            value={Math.round(harmonyControls.dissonance * 100)}
+            onChange={(event) =>
+              onHarmonyControlsChange({
+                ...harmonyControls,
+                dissonance: Number(event.currentTarget.value) / 100,
+              })
+            }
+          />
+        </label>
+        <label className="slider-field">
+          <span>
+            手动声部 <b>{harmonyControls.activeNotes}</b>
+          </span>
+          <input
+            type="range"
+            min={2}
+            max={5}
+            step={1}
+            disabled={harmonyControls.mode !== 'manual'}
+            value={harmonyControls.activeNotes}
+            onChange={(event) =>
+              onHarmonyControlsChange({
+                ...harmonyControls,
+                activeNotes: Number(event.currentTarget.value),
+              })
+            }
+          />
+        </label>
         <label className="slider-field">
           <span>
             和声音量 <b>{Math.round(synthVolume * 100)}%</b>

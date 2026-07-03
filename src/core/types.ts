@@ -224,6 +224,8 @@ export type HarmonyFamily =
   | 'augmented'
   | 'cluster'
 
+export type PlayableHarmonyFamily = Exclude<HarmonyFamily, 'silent'>
+
 export type HarmonyState = {
   family: HarmonyFamily
   label: string
@@ -231,6 +233,16 @@ export type HarmonyState = {
   dissonance: number
   activeNotes: number
   muted: boolean
+}
+
+export type HarmonyControlMode = 'auto' | 'sustain' | 'manual'
+
+export type HarmonyControls = {
+  mode: HarmonyControlMode
+  family: PlayableHarmonyFamily
+  brightness: number
+  dissonance: number
+  activeNotes: number
 }
 
 export type GestureSnapshot = {

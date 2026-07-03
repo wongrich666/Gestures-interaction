@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { createDefaultEmotion, inferAudioEmotion } from '../audio/audioEmotion'
 import { TopologySynthEngine } from '../audio/synthEngine'
 import {
   DEFAULT_CAMERA_QUALITY,
+  DEFAULT_HARMONY_CONTROLS,
   DEFAULT_PARTICLE_CONTROLS,
   EMPTY_AUDIO_FEATURES,
+  HARMONY_FAMILY_LABELS,
 } from '../core/config'
 import type {
   AudioEmotion,
@@ -13,7 +15,10 @@ import type {
   DebugMetrics,
   FaceData,
   FaceIntent,
+  FingerTopology,
   HandData,
+  HarmonyControls,
+  HarmonyState,
   ParticleControls,
   RuntimeStatus,
   VisualStyle,
@@ -66,6 +71,8 @@ export function RealtimeMode() {
   const visualStyleRef = useRef<VisualStyle>('normal')
   const cameraQualityRef = useRef<CameraQuality>(DEFAULT_CAMERA_QUALITY)
   const synthVolumeRef = useRef(DEFAULT_SYNTH_VOLUME)
+  const harmonyControlsRef = useRef<HarmonyControls>(DEFAULT_HARMONY_CONTROLS)
+  const lastPlayableHarmonyRef = useRef<HarmonyState | null>(null)
   const particleControlsRef = useRef<ParticleControls>(DEFAULT_PARTICLE_CONTROLS)
   const emotionRef = useRef<AudioEmotion>(createDefaultEmotion())
   const gestureEngineRef = useRef(new GestureEngine())
@@ -81,6 +88,9 @@ export function RealtimeMode() {
   const [visualStyle, setVisualStyle] = useState<VisualStyle>('normal')
   const [cameraQuality, setCameraQuality] = useState<CameraQuality>(DEFAULT_CAMERA_QUALITY)
   const [synthVolume, setSynthVolume] = useState(DEFAULT_SYNTH_VOLUME)
+  const [harmonyControls, setHarmonyControls] = useState<HarmonyControls>(
+    DEFAULT_HARMONY_CONTROLS,
+  )
   const [particleControls, setParticleControls] = useState<ParticleControls>(
     DEFAULT_PARTICLE_CONTROLS,
   )
@@ -99,6 +109,10 @@ export function RealtimeMode() {
     synthVolumeRef.current = synthVolume
     synthRef.current?.setVolume(synthVolume)
   }, [synthVolume])
+
+  useEffect(() => {
+    harmonyControlsRef.current = harmonyControls
+  }, [harmonyControls])
 
   useEffect(() => {
     particleControlsRef.current = particleControls
@@ -135,6 +149,7 @@ export function RealtimeMode() {
     gestureEngineRef.current.reset()
     stageRef.current?.reset()
     emotionRef.current = createDefaultEmotion()
+    lastPlayableHarmonyRef.current = null
     faceTickRef.current = { lastDetect: 0, face: null }
     faceIntentRef.current = { kind: 'none', intensity: 0, anchor: null }
     setEmotion(emotionRef.current)
@@ -151,6 +166,7 @@ export function RealtimeMode() {
       audio: AudioFeatures,
       nextEmotion: AudioEmotion,
       gesture: ReturnType<GestureEngine['update']>,
+      playbackHarmony: HarmonyState,
       face: FaceData | null,
       faceIntent: FaceIntent,
     ) => {
@@ -183,7 +199,7 @@ export function RealtimeMode() {
         activeFingers: gesture.topology.activeTips.length,
         topologyArea: gesture.topology.normalizedArea,
         topologyCrossings: gesture.topology.intersections.length,
-        harmonyLabel: gesture.harmony.label,
+        harmonyLabel: playbackHarmony.label,
         gesturePhase: gesture.gestureState.phase,
         gestureConfidence: gesture.gestureState.confidence,
         faceIntent: faceIntent.kind,
@@ -261,7 +277,13 @@ export function RealtimeMode() {
       const gesture = video ? gestureEngineRef.current.update(targetHand, now, hands) : emptyGestureSnapshot()
       const faceIntent = analyzeFaceIntent(hands, face)
       faceIntentRef.current = faceIntent
-      synth?.update(gesture.harmony, gesture.topology, now)
+      const playback = resolvePlaybackHarmony(
+        gesture.harmony,
+        gesture.topology,
+        harmonyControlsRef.current,
+        lastPlayableHarmonyRef,
+      )
+      synth?.update(playback.harmony, playback.topology, now)
 
       if (video) {
         stageRef.current?.renderFrame({
@@ -279,7 +301,7 @@ export function RealtimeMode() {
         })
       }
 
-      updateDebug(now, targetHand, audio, nextEmotion, gesture, face, faceIntent)
+      updateDebug(now, targetHand, audio, nextEmotion, gesture, playback.harmony, face, faceIntent)
       animationFrameRef.current = window.requestAnimationFrame(renderLoop)
     },
     [updateDebug],
@@ -336,6 +358,7 @@ export function RealtimeMode() {
       synthRef.current = synth
       gestureEngineRef.current.reset()
       visionTickRef.current = { lastDetect: 0, hands: [] }
+      lastPlayableHarmonyRef.current = null
       faceTickRef.current = { lastDetect: 0, face: null }
       faceIntentRef.current = { kind: 'none', intensity: 0, anchor: null }
       emotionRef.current = createDefaultEmotion()
@@ -376,6 +399,7 @@ export function RealtimeMode() {
         visualStyle={visualStyle}
         cameraQuality={cameraQuality}
         synthVolume={synthVolume}
+        harmonyControls={harmonyControls}
         debug={debug}
         emotion={emotion}
         particleControls={particleControls}
@@ -384,6 +408,7 @@ export function RealtimeMode() {
         onVisualStyleChange={setVisualStyle}
         onCameraQualityChange={setCameraQuality}
         onSynthVolumeChange={setSynthVolume}
+        onHarmonyControlsChange={setHarmonyControls}
         onParticleControlsChange={setParticleControls}
       />
     </main>
@@ -392,6 +417,57 @@ export function RealtimeMode() {
 
 function selectTargetHand(hands: HandData[]) {
   return selectInteractiveHand(hands)
+}
+
+function resolvePlaybackHarmony(
+  harmony: HarmonyState,
+  topology: FingerTopology,
+  controls: HarmonyControls,
+  lastPlayableHarmonyRef: MutableRefObject<HarmonyState | null>,
+) {
+  if (controls.mode === 'auto') {
+    if (!harmony.muted) {
+      lastPlayableHarmonyRef.current = harmony
+    }
+
+    return { harmony, topology }
+  }
+
+  if (controls.mode === 'sustain' && !harmony.muted) {
+    lastPlayableHarmonyRef.current = harmony
+    return { harmony, topology }
+  }
+
+  const fallbackHarmony =
+    controls.mode === 'manual'
+      ? createManualHarmony(controls)
+      : lastPlayableHarmonyRef.current ?? createManualHarmony(controls)
+  const playbackTopology = createPlaybackTopology(topology, fallbackHarmony)
+
+  return {
+    harmony: fallbackHarmony,
+    topology: playbackTopology,
+  }
+}
+
+function createManualHarmony(controls: HarmonyControls): HarmonyState {
+  return {
+    family: controls.family,
+    label: `手动 · ${HARMONY_FAMILY_LABELS[controls.family]}`,
+    brightness: controls.brightness,
+    dissonance: controls.dissonance,
+    activeNotes: controls.activeNotes,
+    muted: false,
+  }
+}
+
+function createPlaybackTopology(topology: FingerTopology, harmony: HarmonyState): FingerTopology {
+  return {
+    ...topology,
+    normalizedArea: harmony.brightness,
+    crossDensity: harmony.dissonance,
+    muted: false,
+  }
 }
 
 function toErrorMessage(error: unknown) {
