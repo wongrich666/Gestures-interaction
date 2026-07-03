@@ -67,6 +67,7 @@ export function RealtimeMode() {
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const micStreamRef = useRef<MediaStream | null>(null)
   const animationFrameRef = useRef<number | null>(null)
+  const autoStartRef = useRef(false)
   const runningRef = useRef(false)
   const visualStyleRef = useRef<VisualStyle>('normal')
   const cameraQualityRef = useRef<CameraQuality>(DEFAULT_CAMERA_QUALITY)
@@ -313,13 +314,18 @@ export function RealtimeMode() {
     }
 
     setStatus('starting')
-    setMessage('正在请求摄像头和麦克风')
+    setMessage('正在请求摄像头')
 
     try {
-      const [cameraStream, micStream] = await Promise.all([
-        requestCameraStream(cameraQualityRef.current),
-        requestMicStream(),
-      ])
+      const cameraStream = await requestCameraStream(cameraQualityRef.current)
+      let micStream: MediaStream | null = null
+
+      try {
+        micStream = await requestMicStream()
+      } catch (error) {
+        console.warn('Microphone unavailable; continuing with camera-only mode.', error)
+      }
+
       cameraStreamRef.current = cameraStream
       micStreamRef.current = micStream
 
@@ -346,10 +352,15 @@ export function RealtimeMode() {
         console.warn('Face tracker unavailable; continuing without face anchors.', error)
       }
 
-      const audioAnalyser = new MicAudioAnalyser(micStream)
+      let audioAnalyser: MicAudioAnalyser | null = null
       const synth = new TopologySynthEngine()
       synth.setVolume(synthVolumeRef.current)
-      await audioAnalyser.resume()
+
+      if (micStream) {
+        audioAnalyser = new MicAudioAnalyser(micStream)
+        await audioAnalyser.resume()
+      }
+
       await synth.resume()
 
       trackerRef.current = tracker
@@ -378,6 +389,19 @@ export function RealtimeMode() {
       setDebug(initialDebug)
     }
   }, [releaseResources, renderLoop, status])
+
+  useEffect(() => {
+    if (autoStartRef.current) {
+      return
+    }
+
+    autoStartRef.current = true
+    const timeoutId = window.setTimeout(() => {
+      void startRealtime()
+    }, 250)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [startRealtime])
 
   useEffect(() => {
     return () => {

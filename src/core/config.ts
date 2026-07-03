@@ -36,7 +36,7 @@ export const TRAIL_MIN_DISTANCE = 0.008
 
 export const DEFAULT_PARTICLE_CONTROLS: ParticleControls = {
   preset: 'nebula',
-  density: 360,
+  density: 12000,
   spread: 1,
   color: '#5ee4ff',
   customShape: [],
@@ -77,13 +77,19 @@ export const DEFAULT_HARMONY_CONTROLS: HarmonyControls = {
   activeNotes: 4,
 }
 
-export const PARTICLE_PRESETS: ParticlePreset[] = ['nebula', 'heart', 'sphere', 'ring', 'custom']
+export const PARTICLE_PRESETS: ParticlePreset[] = [
+  'nebula',
+  'heart',
+  'saturn',
+  'firework',
+  'custom',
+]
 
 export const PARTICLE_PRESET_LABELS: Record<ParticlePreset, string> = {
   nebula: '星云',
   heart: '爱心',
-  sphere: '星球',
-  ring: '星环',
+  saturn: '土星',
+  firework: '烟花',
   custom: '手绘',
 }
 

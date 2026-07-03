@@ -165,7 +165,7 @@ function drawFrame(
   drawStageWash(ctx, videoRect, frame.audio, emotion, frame.now)
   drawStyleOverlay(ctx, videoRect, frame.visualStyle, focusPoint, frame.audio, emotion, frame.now)
   drawTopologyNetwork(ctx, videoRect, frame.gesture.topology, emotion, frame.mirrored ?? true)
-  particles.drawBackground(ctx, surface, frame.audio, emotion, frame.now)
+  particles.drawBackground(ctx, surface, frame.audio, emotion, frame.now, particleControls)
 
   if (focusPoint && frame.gesture.indexVelocity > 0.00004) {
     trails.addPoint(focusPoint, frame.now, frame.audio.mid + frame.gesture.indexVelocity * 80)
@@ -206,6 +206,8 @@ function drawFrame(
   trails.update(frame.now)
   particles.update(deltaMs, {
     surface,
+    videoRect,
+    mirrored: frame.mirrored ?? true,
     focusPoint,
     palmPoint,
     gesture: frame.gesture,
@@ -244,6 +246,7 @@ function drawFrame(
     emotion,
     frame.mirrored ?? true,
   )
+  drawCameraPreview(ctx, surface, frame.video, frame.hands, frame.mirrored ?? true)
 }
 
 function drawBackground(
@@ -400,6 +403,90 @@ function drawFingerTip(
   ctx.shadowColor = 'rgba(67, 212, 255, 0.9)'
   ctx.arc(indexTip.x, indexTip.y, 7, 0, Math.PI * 2)
   ctx.fill()
+  ctx.restore()
+}
+
+function drawCameraPreview(
+  ctx: CanvasRenderingContext2D,
+  surface: CanvasRect,
+  video: HTMLVideoElement,
+  hands: HandData[],
+  mirrored: boolean,
+) {
+  const previewWidth = Math.min(320, Math.max(210, surface.width * 0.28))
+  const previewHeight = previewWidth * 0.75
+  const margin = 16
+  const previewRect: CanvasRect = {
+    x: margin,
+    y: surface.height - previewHeight - margin,
+    width: previewWidth,
+    height: previewHeight,
+  }
+  const videoRect = containRect(
+    previewRect.width,
+    previewRect.height,
+    video.videoWidth,
+    video.videoHeight,
+  )
+  const contentRect: CanvasRect = {
+    x: previewRect.x + videoRect.x,
+    y: previewRect.y + videoRect.y,
+    width: videoRect.width,
+    height: videoRect.height,
+  }
+
+  ctx.save()
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.56)'
+  ctx.fillRect(previewRect.x - 2, previewRect.y - 2, previewRect.width + 4, previewRect.height + 4)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)'
+  ctx.lineWidth = 1
+  ctx.strokeRect(previewRect.x - 2, previewRect.y - 2, previewRect.width + 4, previewRect.height + 4)
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(previewRect.x, previewRect.y, previewRect.width, previewRect.height)
+  ctx.clip()
+  ctx.fillStyle = '#050506'
+  ctx.fillRect(previewRect.x, previewRect.y, previewRect.width, previewRect.height)
+
+  if (mirrored) {
+    ctx.translate(contentRect.x + contentRect.width, contentRect.y)
+    ctx.scale(-1, 1)
+    ctx.drawImage(video, 0, 0, contentRect.width, contentRect.height)
+  } else {
+    ctx.drawImage(video, contentRect.x, contentRect.y, contentRect.width, contentRect.height)
+  }
+
+  ctx.restore()
+
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.96)'
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.98)'
+  ctx.lineWidth = 1.5
+  ctx.shadowBlur = 8
+  ctx.shadowColor = 'rgba(255, 255, 255, 0.42)'
+
+  for (const hand of hands) {
+    for (const [startIndex, endIndex] of HAND_CONNECTIONS) {
+      const start = landmarkToCanvas(hand.landmarks[startIndex], contentRect, mirrored)
+      const end = landmarkToCanvas(hand.landmarks[endIndex], contentRect, mirrored)
+      ctx.beginPath()
+      ctx.moveTo(start.x, start.y)
+      ctx.lineTo(end.x, end.y)
+      ctx.stroke()
+    }
+
+    for (const landmark of hand.landmarks) {
+      const point = landmarkToCanvas(landmark, contentRect, mirrored)
+      ctx.beginPath()
+      ctx.arc(point.x, point.y, 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  ctx.restore()
   ctx.restore()
 }
 

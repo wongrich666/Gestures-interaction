@@ -283,8 +283,8 @@ export type VisualStyle =
 export type ParticlePreset =
   | 'nebula'
   | 'heart'
-  | 'sphere'
-  | 'ring'
+  | 'saturn'
+  | 'firework'
   | 'custom'
 
 export type ParticleControls = {

@@ -82,9 +82,9 @@ export function ParticlePanel({ controls, onChange }: ParticlePanelProps) {
         </span>
         <input
           type="range"
-          min="120"
-          max="1200"
-          step="20"
+          min="1000"
+          max="70000"
+          step="1000"
           value={activeControls.density}
           onChange={(event) => updateControls({ density: Number(event.currentTarget.value) })}
         />
@@ -96,8 +96,8 @@ export function ParticlePanel({ controls, onChange }: ParticlePanelProps) {
         </span>
         <input
           type="range"
-          min="0.25"
-          max="2.5"
+          min="0.2"
+          max="3.5"
           step="0.05"
           value={activeControls.spread}
           onChange={(event) => updateControls({ spread: Number(event.currentTarget.value) })}

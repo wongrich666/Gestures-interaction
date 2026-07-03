@@ -1,11 +1,13 @@
 import { DEFAULT_PARTICLE_CONTROLS } from '../core/config'
-import { clamp } from '../core/math'
+import { clamp, landmarkToCanvas, lerp } from '../core/math'
 import type {
   AudioEmotion,
   AudioFeatures,
   CanvasRect,
   GestureSnapshot,
+  HandFingerState,
   ParticleControls,
+  ParticlePreset,
   Point2D,
   VisualStyle,
 } from '../core/types'
@@ -28,24 +30,14 @@ type FieldParticle = {
   vx: number
   vy: number
   vz: number
-  sx: number
-  sy: number
-  sz: number
   seed: number
   radius: number
-  hueShift: number
-}
-
-type BackgroundParticle = {
-  x: number
-  y: number
-  z: number
-  drift: number
-  hueShift: number
 }
 
 type FieldOptions = {
   surface: CanvasRect
+  videoRect: CanvasRect
+  mirrored: boolean
   focusPoint: Point2D | null
   palmPoint: Point2D | null
   gesture: GestureSnapshot
@@ -55,12 +47,28 @@ type FieldOptions = {
   now: number
 }
 
+type FieldModel = {
+  center: Point2D
+  scale: number
+  opacity: number
+  handOpen: number
+  activeFingers: number
+  mode: 'gather' | 'star' | 'bezier' | 'euler' | 'lissajous' | 'scatter'
+}
+
+type ShapePoint = Point2D & {
+  z: number
+}
+
 export class ParticleSystem {
   private readonly bursts: BurstParticle[] = []
   private readonly fieldParticles: FieldParticle[] = []
-  private readonly backgroundParticles: BackgroundParticle[] = []
   private fieldSignature = ''
-  private backgroundSignature = ''
+  private starSignature = ''
+  private starCanvas: HTMLCanvasElement | null = null
+  private lastHandsAt = -Infinity
+  private lastCenter: Point2D | null = null
+  private fieldOpacity = 0
 
   burst(origin: Point2D, style: VisualStyle, audio: AudioFeatures, emotion?: AudioEmotion) {
     const count = Math.round(24 + audio.bass * 42)
@@ -91,8 +99,7 @@ export class ParticleSystem {
 
   update(deltaMs: number, options: FieldOptions) {
     const controls = normalizeControls(options.controls)
-    this.ensureBackground(options.surface)
-    this.ensureField(controls, options.surface)
+    this.ensureField(controls)
     this.updateField(deltaMs, options, controls)
     this.updateBursts(deltaMs, options.audio)
   }
@@ -103,51 +110,46 @@ export class ParticleSystem {
     audio: AudioFeatures,
     emotion: AudioEmotion,
     now: number,
+    controls?: ParticleControls,
   ) {
-    this.ensureBackground(surface)
+    const activeControls = normalizeControls(controls)
+    this.ensureStarfield(surface, activeControls)
 
-    ctx.save()
-    ctx.globalCompositeOperation = 'lighter'
-
-    for (const particle of this.backgroundParticles) {
-      const depth = clamp(particle.z, 0, 1)
-      const driftX = Math.sin(now * 0.00008 + particle.drift) * 18 * depth
-      const driftY = Math.cos(now * 0.00006 + particle.drift) * 8 * depth
-      const radius = 0.55 + depth * 1.9 + audio.treble * 1.1
-      const alpha = 0.12 + depth * 0.34 + audio.bass * 0.14
-      const hue = moodHue(emotion.mood) + particle.hueShift
-
-      ctx.beginPath()
-      ctx.fillStyle = `hsla(${hue}, 94%, ${58 + depth * 24}%, ${alpha})`
-      ctx.shadowBlur = 8 + depth * 18
-      ctx.shadowColor = `hsla(${hue}, 100%, 68%, ${alpha})`
-      ctx.arc(particle.x + driftX, particle.y + driftY, radius, 0, Math.PI * 2)
-      ctx.fill()
+    if (!this.starCanvas) {
+      return
     }
 
+    ctx.save()
+    ctx.globalCompositeOperation = 'screen'
+    ctx.globalAlpha = 0.34 + audio.treble * 0.12 + emotion.motion * 0.08
+    const driftX = Math.sin(now * 0.00003) * 8
+    const driftY = Math.cos(now * 0.000025) * 5
+    ctx.drawImage(this.starCanvas, surface.x + driftX, surface.y + driftY, surface.width, surface.height)
+    ctx.globalAlpha *= 0.42
+    ctx.drawImage(this.starCanvas, surface.x - driftX * 0.6, surface.y - driftY * 0.6, surface.width, surface.height)
     ctx.restore()
   }
 
   draw(ctx: CanvasRenderingContext2D, controls?: ParticleControls) {
     const activeControls = normalizeControls(controls)
-    const hue = hexToHue(activeControls.color)
+    const color = hexToRgb(activeControls.color)
 
     ctx.save()
     ctx.globalCompositeOperation = 'lighter'
 
-    for (const particle of this.fieldParticles) {
-      const depth = clamp((particle.z + 1.4) / 2.8, 0, 1)
-      const radius = particle.radius * (0.62 + (1 - depth) * 1.25)
-      const alpha = 0.38 + (1 - depth) * 0.42
-      const lightness = 58 + (1 - depth) * 20
-      const particleHue = hue + particle.hueShift
+    if (this.fieldOpacity > 0.01) {
+      for (const particle of this.fieldParticles) {
+        const depth = clamp((particle.z + 1.25) / 2.5, 0, 1)
+        const radius = particle.radius * (0.68 + depth * 1.15)
+        const alpha = this.fieldOpacity * (0.35 + depth * 0.52)
 
-      ctx.beginPath()
-      ctx.shadowBlur = 14 + (1 - depth) * 28
-      ctx.shadowColor = `hsla(${particleHue}, 100%, 68%, ${alpha * 0.72})`
-      ctx.fillStyle = `hsla(${particleHue}, 96%, ${lightness}%, ${alpha})`
-      ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2)
-      ctx.fill()
+        ctx.beginPath()
+        ctx.shadowBlur = 10 + depth * 18
+        ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 0.72})`
+        ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`
+        ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2)
+        ctx.fill()
+      }
     }
 
     for (const particle of this.bursts) {
@@ -169,14 +171,17 @@ export class ParticleSystem {
   clear() {
     this.bursts.length = 0
     this.fieldParticles.length = 0
-    this.backgroundParticles.length = 0
     this.fieldSignature = ''
-    this.backgroundSignature = ''
+    this.starSignature = ''
+    this.starCanvas = null
+    this.lastHandsAt = -Infinity
+    this.lastCenter = null
+    this.fieldOpacity = 0
   }
 
-  private ensureField(controls: ParticleControls, surface: CanvasRect) {
-    const targetCount = Math.round(clamp(controls.density, 120, 1200))
-    const signature = `${controls.preset}:${targetCount}:${Math.round(surface.width)}x${Math.round(surface.height)}:${shapeSignature(controls)}`
+  private ensureField(controls: ParticleControls) {
+    const targetCount = Math.round(clamp(controls.density, 1000, 3000))
+    const signature = `${targetCount}`
 
     if (signature !== this.fieldSignature) {
       this.fieldSignature = signature
@@ -184,22 +189,15 @@ export class ParticleSystem {
     }
 
     while (this.fieldParticles.length < targetCount) {
-      const index = this.fieldParticles.length
-      const shape = sampleShapePoint(index, targetCount, controls)
-
       this.fieldParticles.push({
-        x: surface.x + surface.width * (0.35 + Math.random() * 0.3),
-        y: surface.y + surface.height * (0.35 + Math.random() * 0.3),
+        x: 0,
+        y: 0,
         z: Math.random() * 2 - 1,
         vx: 0,
         vy: 0,
         vz: 0,
-        sx: shape.x,
-        sy: shape.y,
-        sz: shape.z,
         seed: Math.random() * 1000,
-        radius: 0.8 + Math.random() * 2.2,
-        hueShift: Math.random() * 34 - 17,
+        radius: 0.8 + Math.random() * 1.85,
       })
     }
 
@@ -208,79 +206,58 @@ export class ParticleSystem {
     }
   }
 
-  private ensureBackground(surface: CanvasRect) {
-    const signature = `${Math.round(surface.width)}x${Math.round(surface.height)}`
+  private ensureStarfield(surface: CanvasRect, controls: ParticleControls) {
+    const starCount = Math.round(clamp(controls.density, 1000, 70000))
+    const signature = `${Math.round(surface.width)}x${Math.round(surface.height)}:${starCount}`
 
-    if (signature === this.backgroundSignature && this.backgroundParticles.length) {
+    if (signature === this.starSignature && this.starCanvas) {
       return
     }
 
-    this.backgroundSignature = signature
-    this.backgroundParticles.length = 0
+    this.starSignature = signature
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(surface.width))
+    canvas.height = Math.max(1, Math.round(surface.height))
+    const ctx = canvas.getContext('2d')
 
-    for (let index = 0; index < 180; index += 1) {
-      this.backgroundParticles.push({
-        x: surface.x + Math.random() * surface.width,
-        y: surface.y + Math.random() * surface.height,
-        z: Math.random(),
-        drift: Math.random() * Math.PI * 2,
-        hueShift: Math.random() * 40 - 20,
-      })
+    if (!ctx) {
+      this.starCanvas = null
+      return
     }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.globalCompositeOperation = 'lighter'
+
+    for (let index = 0; index < starCount; index += 1) {
+      const z = hash(index + 9)
+      const x = hash(index * 3 + 1) * canvas.width
+      const y = hash(index * 5 + 2) * canvas.height
+      const radius = z > 0.985 ? 1.7 : z > 0.92 ? 1.05 : 0.55
+      const alpha = 0.06 + z * 0.34
+      const hue = 190 + (hash(index + 44) - 0.5) * 48
+
+      ctx.beginPath()
+      ctx.fillStyle = `hsla(${hue}, 90%, ${62 + z * 24}%, ${alpha})`
+      ctx.arc(x, y, radius, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    this.starCanvas = canvas
   }
 
   private updateField(deltaMs: number, options: FieldOptions, controls: ParticleControls) {
-    const { surface, focusPoint, palmPoint, gesture, audio, emotion, now } = options
-    const center = palmPoint ?? focusPoint ?? {
-      x: surface.x + surface.width * 0.5,
-      y: surface.y + surface.height * 0.48,
-    }
-    const handOpen = gesture.detected ? gesture.palmOpenness : 0.58
-    const twoHandBoost =
-      gesture.twoHandDistance === null ? 1 : clamp(gesture.twoHandDistance * 2.3, 0.58, 1.85)
-    const poseBoost =
-      gesture.visualGesture === 'open_wheel'
-        ? 1.85
-        : gesture.visualGesture === 'finger_gun' || gesture.visualGesture === 'punch'
-          ? 1.38
-          : gesture.visualGesture === 'finger_heart' || gesture.visualGesture === 'two_hand_heart'
-            ? 0.82
-            : gesture.handPose === 'expand' || gesture.handPose === 'open'
-        ? 1.28
-        : gesture.handPose === 'fist' || gesture.handPose === 'contract'
-          ? 0.55
-          : gesture.handPose === 'pinch'
-            ? 0.44
-            : 1
-    const baseScale =
-      Math.min(surface.width, surface.height) *
-      0.18 *
-      clamp(controls.spread, 0.25, 2.5) *
-      (0.48 + handOpen * 1.28 + audio.bass * 0.34) *
-      twoHandBoost *
-      poseBoost
-    const gather = gesture.detected ? 1 - handOpen : 0.16
-    const dt = Math.min(2.4, deltaMs / 16.67)
-    const stiffness = 0.024 + emotion.motion * 0.012
-    const damping = 0.82 - emotion.tension * 0.04
+    const model = this.resolveFieldModel(options, controls)
+    const dt = Math.min(2.2, deltaMs / 16.67)
+    const stiffness = 0.16 + options.emotion.motion * 0.04
+    const damping = 0.68 - options.emotion.tension * 0.04
+    const count = Math.max(1, this.fieldParticles.length)
 
-    for (const particle of this.fieldParticles) {
-      const orbit = now * 0.00016 * (0.45 + emotion.motion) + particle.seed
-      const wave = Math.sin(orbit * 2.2) * (8 + audio.mid * 18)
-      const depth = particle.sz + Math.cos(orbit) * 0.18 + audio.bass * 0.2
-      const parallax = 1 + depth * 0.16
-      const gatherJitter = gather * (18 + audio.treble * 28)
-      const targetX =
-        center.x +
-        particle.sx * baseScale * parallax +
-        Math.cos(orbit) * wave +
-        Math.sin(particle.seed * 1.7) * gatherJitter
-      const targetY =
-        center.y +
-        particle.sy * baseScale * parallax +
-        Math.sin(orbit * 0.8) * wave +
-        Math.cos(particle.seed * 1.3) * gatherJitter
-      const targetZ = depth * clamp(controls.spread, 0.4, 2.5)
+    for (let index = 0; index < this.fieldParticles.length; index += 1) {
+      const particle = this.fieldParticles[index]
+      const shape = sampleGestureShape(index, count, particle.seed, model, controls)
+      const targetX = model.center.x + shape.x * model.scale
+      const targetY = model.center.y + shape.y * model.scale
+      const targetZ = shape.z
 
       particle.vx = (particle.vx + (targetX - particle.x) * stiffness) * damping
       particle.vy = (particle.vy + (targetY - particle.y) * stiffness) * damping
@@ -289,10 +266,58 @@ export class ParticleSystem {
       particle.y += particle.vy * dt
       particle.z += particle.vz * dt
 
-      if (audio.beat) {
-        particle.vx += (Math.random() - 0.5) * 0.7
-        particle.vy += (Math.random() - 0.5) * 0.7
+      if (options.audio.beat && model.mode === 'scatter') {
+        particle.vx += (hash(index + options.now * 0.01) - 0.5) * 1.4
+        particle.vy += (hash(index + 17 + options.now * 0.01) - 0.5) * 1.4
       }
+    }
+  }
+
+  private resolveFieldModel(options: FieldOptions, controls: ParticleControls): FieldModel {
+    const { gesture, surface, videoRect, mirrored, now } = options
+    const visibleHands = gesture.handStates
+
+    if (visibleHands.length) {
+      this.lastHandsAt = now
+    }
+
+    const liveOpacity = visibleHands.length ? 1 : clamp(1 - (now - this.lastHandsAt) / 1000, 0, 1)
+    this.fieldOpacity = lerp(this.fieldOpacity, liveOpacity, visibleHands.length ? 0.42 : 0.16)
+
+    const center = visibleHands.length
+      ? averagePoints(visibleHands.map((hand) => landmarkToCanvas(hand.palmCenter, videoRect, mirrored)))
+      : this.lastCenter ?? {
+          x: surface.x + surface.width * 0.5,
+          y: surface.y + surface.height * 0.5,
+        }
+
+    this.lastCenter = center
+
+    const strongestHand = resolveStrongestHand(visibleHands)
+    const handOpen = visibleHands.length
+      ? visibleHands.reduce((sum, hand) => sum + hand.palmOpenness, 0) / visibleHands.length
+      : 0
+    const activeFingers = strongestHand?.activeTips.length ?? 0
+    const allFists = visibleHands.length > 0 && visibleHands.every((hand) => hand.fist)
+    const handScale = strongestHand
+      ? strongestHand.handScale * Math.min(videoRect.width, videoRect.height) * 3.2
+      : Math.min(surface.width, surface.height) * 0.16
+    const twoHandBoost =
+      gesture.twoHandDistance === null ? 1 : clamp(gesture.twoHandDistance * 2.35, 0.7, 1.85)
+    const opennessScale = allFists ? 0.18 : 0.52 + handOpen * 1.38
+    const mode = resolveFieldMode(activeFingers, allFists)
+    const scale =
+      mode === 'scatter'
+        ? Math.max(surface.width, surface.height) * clamp(controls.spread, 0.2, 3.5)
+        : clamp(handScale, 42, 230) * opennessScale * twoHandBoost * clamp(controls.spread, 0.2, 3.5)
+
+    return {
+      center,
+      scale,
+      opacity: this.fieldOpacity,
+      handOpen,
+      activeFingers,
+      mode,
     }
   }
 
@@ -319,19 +344,166 @@ export class ParticleSystem {
   }
 }
 
-function normalizeControls(controls?: ParticleControls): ParticleControls {
-  return controls ?? DEFAULT_PARTICLE_CONTROLS
+function resolveFieldMode(activeFingers: number, allFists: boolean): FieldModel['mode'] {
+  if (allFists || activeFingers <= 0) {
+    return 'gather'
+  }
+
+  if (activeFingers === 1) {
+    return 'star'
+  }
+
+  if (activeFingers === 2) {
+    return 'bezier'
+  }
+
+  if (activeFingers === 3) {
+    return 'euler'
+  }
+
+  if (activeFingers === 4) {
+    return 'lissajous'
+  }
+
+  return 'scatter'
 }
 
-function sampleShapePoint(index: number, count: number, controls: ParticleControls) {
-  if (controls.preset === 'custom' && controls.customShape.length > 1) {
-    const point = controls.customShape[index % controls.customShape.length]
-    const jitter = (hash(index + 7) - 0.5) * 0.07
+function resolveStrongestHand(hands: HandFingerState[]) {
+  return hands.reduce<HandFingerState | null>((best, hand) => {
+    if (!best) {
+      return hand
+    }
+
+    const handScore = hand.activeTips.length + hand.palmOpenness * 1.2 + hand.fingerSpread
+    const bestScore = best.activeTips.length + best.palmOpenness * 1.2 + best.fingerSpread
+
+    return handScore > bestScore ? hand : best
+  }, null)
+}
+
+function sampleGestureShape(
+  index: number,
+  count: number,
+  seed: number,
+  model: FieldModel,
+  controls: ParticleControls,
+): ShapePoint {
+  const t = ((index / count) + hash(seed)) % 1
+  const jitter = (hash(seed + 3) - 0.5) * (model.mode === 'gather' ? 0.08 : 0.12)
+  const preset = samplePresetShape(index, count, seed, controls.preset, controls.customShape)
+  let point: ShapePoint
+
+  if (model.mode === 'gather') {
+    const angle = Math.PI * 2 * goldenRatio(index)
+    const radius = Math.sqrt(hash(seed + 6)) * (0.06 + model.handOpen * 0.08)
+    point = {
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+      z: (hash(seed + 7) - 0.5) * 0.28,
+    }
+  } else if (model.mode === 'star') {
+    point = sampleStarLine(t, jitter)
+  } else if (model.mode === 'bezier') {
+    point = sampleCubicBezier(t, jitter)
+  } else if (model.mode === 'euler') {
+    point = sampleEulerSpiral(t, jitter)
+  } else if (model.mode === 'lissajous') {
+    point = sampleLissajous(t, jitter)
+  } else {
+    const angle = Math.PI * 2 * goldenRatio(index)
+    const radius = 0.2 + Math.sqrt(t) * 0.58 + hash(seed + 13) * 0.2
+    point = {
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+      z: (hash(seed + 14) - 0.5) * 1.8,
+    }
+  }
+
+  if (model.mode === 'scatter') {
+    return point
+  }
+
+  const presetBlend = controls.preset === 'custom' ? 0.28 : 0.18
+
+  return {
+    x: lerp(point.x, preset.x, presetBlend),
+    y: lerp(point.y, preset.y, presetBlend),
+    z: lerp(point.z, preset.z, presetBlend),
+  }
+}
+
+function sampleStarLine(t: number, jitter: number): ShapePoint {
+  const points = Array.from({ length: 10 }, (_, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI * 2) / 10
+    const radius = index % 2 === 0 ? 0.72 : 0.32
 
     return {
-      x: (point.x - 0.5) * 2 + jitter,
-      y: (point.y - 0.5) * 2 + jitter,
-      z: (hash(index + 17) - 0.5) * 0.7,
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+    }
+  })
+  const segment = Math.floor(t * points.length)
+  const local = t * points.length - segment
+  const from = points[segment % points.length]
+  const to = points[(segment + 1) % points.length]
+
+  return {
+    x: lerp(from.x, to.x, local) + jitter,
+    y: lerp(from.y, to.y, local) + jitter * 0.6,
+    z: (local - 0.5) * 0.6,
+  }
+}
+
+function sampleCubicBezier(t: number, jitter: number): ShapePoint {
+  const u = 1 - t
+  const p0 = { x: -0.8, y: 0.34 }
+  const p1 = { x: -0.35, y: -0.82 }
+  const p2 = { x: 0.38, y: 0.82 }
+  const p3 = { x: 0.84, y: -0.24 }
+
+  return {
+    x: u ** 3 * p0.x + 3 * u ** 2 * t * p1.x + 3 * u * t ** 2 * p2.x + t ** 3 * p3.x + jitter,
+    y: u ** 3 * p0.y + 3 * u ** 2 * t * p1.y + 3 * u * t ** 2 * p2.y + t ** 3 * p3.y,
+    z: Math.sin(t * Math.PI) * 0.7,
+  }
+}
+
+function sampleEulerSpiral(t: number, jitter: number): ShapePoint {
+  const s = (t - 0.5) * 2.4
+  const angle = s * s * 4.2 * Math.sign(s || 1)
+  const radius = Math.abs(s) * 0.52
+
+  return {
+    x: Math.cos(angle) * radius + jitter,
+    y: Math.sin(angle) * radius + s * 0.18,
+    z: s * 0.7,
+  }
+}
+
+function sampleLissajous(t: number, jitter: number): ShapePoint {
+  const angle = t * Math.PI * 2
+
+  return {
+    x: Math.sin(angle * 3 + Math.PI / 2) * 0.72 + jitter,
+    y: Math.sin(angle * 4) * 0.52,
+    z: Math.cos(angle * 2) * 0.75,
+  }
+}
+
+function samplePresetShape(
+  index: number,
+  count: number,
+  seed: number,
+  preset: ParticlePreset,
+  customShape: Point2D[],
+): ShapePoint {
+  if (preset === 'custom' && customShape.length > 1) {
+    const point = customShape[index % customShape.length]
+
+    return {
+      x: (point.x - 0.5) * 1.4,
+      y: (point.y - 0.5) * 1.4,
+      z: (hash(seed + 21) - 0.5) * 0.7,
     }
   }
 
@@ -339,36 +511,32 @@ function sampleShapePoint(index: number, count: number, controls: ParticleContro
   const angle = Math.PI * 2 * goldenRatio(index)
   const radius = Math.sqrt(t)
 
-  if (controls.preset === 'heart') {
-    const a = angle
-    const x = 0.055 * 16 * Math.sin(a) ** 3
+  if (preset === 'heart') {
+    const x = 0.052 * 16 * Math.sin(angle) ** 3
     const y =
-      -0.055 *
-      (13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a))
-    const shell = 0.72 + hash(index) * 0.34
+      -0.052 *
+      (13 * Math.cos(angle) - 5 * Math.cos(2 * angle) - 2 * Math.cos(3 * angle) - Math.cos(4 * angle))
 
-    return { x: x * shell, y: y * shell, z: (hash(index + 11) - 0.5) * 0.82 }
+    return { x, y, z: (hash(seed + 11) - 0.5) * 0.82 }
   }
 
-  if (controls.preset === 'sphere') {
-    const z = 1 - 2 * t
-    const r = Math.sqrt(Math.max(0, 1 - z * z))
+  if (preset === 'saturn') {
+    const ring = 0.54 + hash(seed + 4) * 0.22
 
     return {
-      x: Math.cos(angle) * r,
-      y: Math.sin(angle) * r * 0.82,
-      z,
+      x: Math.cos(angle) * ring,
+      y: Math.sin(angle) * ring * 0.26,
+      z: Math.sin(angle + hash(seed) * Math.PI) * 0.7,
     }
   }
 
-  if (controls.preset === 'ring') {
-    const ringRadius = 0.78 + (hash(index + 4) - 0.5) * 0.18
-    const ySquash = 0.38 + hash(index + 9) * 0.12
+  if (preset === 'firework') {
+    const burst = radius * (0.45 + hash(seed + 12) * 0.55)
 
     return {
-      x: Math.cos(angle) * ringRadius,
-      y: Math.sin(angle) * ringRadius * ySquash,
-      z: Math.sin(angle + hash(index) * Math.PI) * 0.56,
+      x: Math.cos(angle) * burst,
+      y: Math.sin(angle) * burst,
+      z: (hash(seed + 17) - 0.5) * 1.4,
     }
   }
 
@@ -376,18 +544,29 @@ function sampleShapePoint(index: number, count: number, controls: ParticleContro
   const spiral = angle + arm * 2.1
 
   return {
-    x: Math.cos(spiral) * radius * (0.45 + hash(index + 2) * 0.58),
-    y: Math.sin(spiral) * radius * (0.3 + hash(index + 3) * 0.52),
-    z: (hash(index + 5) - 0.5) * 1.6,
+    x: Math.cos(spiral) * radius * (0.45 + hash(seed + 2) * 0.58),
+    y: Math.sin(spiral) * radius * (0.3 + hash(seed + 3) * 0.52),
+    z: (hash(seed + 5) - 0.5) * 1.6,
   }
 }
 
-function shapeSignature(controls: ParticleControls) {
-  if (controls.preset !== 'custom') {
-    return controls.preset
-  }
+function normalizeControls(controls?: ParticleControls): ParticleControls {
+  return controls ?? DEFAULT_PARTICLE_CONTROLS
+}
 
-  return `${controls.customShape.length}:${controls.customShape.slice(0, 12).map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join('|')}`
+function averagePoints(points: Point2D[]): Point2D {
+  const total = points.reduce(
+    (sum, point) => ({
+      x: sum.x + point.x,
+      y: sum.y + point.y,
+    }),
+    { x: 0, y: 0 },
+  )
+
+  return {
+    x: total.x / points.length,
+    y: total.y / points.length,
+  }
 }
 
 function goldenRatio(index: number) {
@@ -413,30 +592,12 @@ function moodHue(mood: AudioEmotion['mood']) {
   return hues[mood]
 }
 
-function hexToHue(hex: string) {
+function hexToRgb(hex: string) {
   const value = hex.replace('#', '')
-  const r = Number.parseInt(value.slice(0, 2), 16) / 255
-  const g = Number.parseInt(value.slice(2, 4), 16) / 255
-  const b = Number.parseInt(value.slice(4, 6), 16) / 255
-  const max = Math.max(r, g, b)
-  const min = Math.min(r, g, b)
-  const delta = max - min
 
-  if (delta === 0) {
-    return 196
+  return {
+    r: Number.parseInt(value.slice(0, 2), 16),
+    g: Number.parseInt(value.slice(2, 4), 16),
+    b: Number.parseInt(value.slice(4, 6), 16),
   }
-
-  if (max === r) {
-    return normalizeHue(60 * (((g - b) / delta) % 6))
-  }
-
-  if (max === g) {
-    return normalizeHue(60 * ((b - r) / delta + 2))
-  }
-
-  return normalizeHue(60 * ((r - g) / delta + 4))
-}
-
-function normalizeHue(hue: number) {
-  return ((hue % 360) + 360) % 360
 }
