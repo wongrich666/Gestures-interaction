@@ -20,7 +20,11 @@ export const HAND_LANDMARKER_MODEL =
 export const FACE_LANDMARKER_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task'
 
-export const DEFAULT_CAMERA_QUALITY: CameraQuality = 'medium'
+export const DEFAULT_CAMERA_QUALITY: CameraQuality = 'low'
+
+export const HAND_DETECT_INTERVAL_MS = 56
+export const FACE_DETECT_INTERVAL_MS = 142
+export const DEBUG_UPDATE_INTERVAL_MS = 350
 
 export const CAMERA_QUALITY_PRESETS: Record<
   CameraQuality,
@@ -37,7 +41,7 @@ export const TRAIL_MIN_DISTANCE = 0.008
 
 export const DEFAULT_PARTICLE_CONTROLS: ParticleControls = {
   preset: 'nebula',
-  density: 12000,
+  density: 5000,
   spread: 1,
   color: '#5ee4ff',
   customShape: [],

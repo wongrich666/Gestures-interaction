@@ -42,8 +42,8 @@ export class LiquidRealityRenderer {
   private readonly prevFingers = new Float32Array(FINGER_FLOATS)
   private error: string | null = null
 
-  constructor() {
-    this.canvas = document.createElement('canvas')
+  constructor(canvas = document.createElement('canvas')) {
+    this.canvas = canvas
     this.canvas.style.display = 'block'
     const gl = this.canvas.getContext('webgl', {
       alpha: false,

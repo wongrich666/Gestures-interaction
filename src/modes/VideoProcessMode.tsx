@@ -476,6 +476,7 @@ export function VideoProcessMode() {
       setStatus('error')
       setMessage(toErrorMessage(error))
     } finally {
+      stageRef.current?.releaseCapture()
       stopPreviewLoop()
       renderCurrentVideoFrame()
     }

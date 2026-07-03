@@ -46,6 +46,7 @@ export type StageCanvasHandle = {
   renderFrame: (frame: StageFrame) => void
   reset: () => void
   getCanvas: () => HTMLCanvasElement | null
+  releaseCapture: () => void
 }
 
 type StageCanvasProps = {
@@ -57,9 +58,18 @@ type BurstTiming = {
   gestureAt: number
 }
 
+type RenderOutput = {
+  videoRect: CanvasRect
+  liquidActive: boolean
+}
+
 export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
   ({ className }, ref) => {
-    const canvasRef = useRef<HTMLCanvasElement | null>(null)
+    const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null)
+    const liquidCanvasRef = useRef<HTMLCanvasElement | null>(null)
+    const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
+    const captureActiveRef = useRef(false)
+    const lastRenderOutputRef = useRef<RenderOutput | null>(null)
     const particlesRef = useRef(new ParticleSystem())
     const trailsRef = useRef(new TrailSystem())
     const liquidRef = useRef<LiquidRealityRenderer | null>(null)
@@ -69,30 +79,46 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
 
     useImperativeHandle(ref, () => ({
       renderFrame(frame) {
-        const canvas = canvasRef.current
-        const ctx = canvas?.getContext('2d')
+        const overlayCanvas = overlayCanvasRef.current
+        const liquidCanvas = liquidCanvasRef.current
+        const ctx = overlayCanvas?.getContext('2d')
 
-        if (!canvas || !ctx) {
+        if (!overlayCanvas || !ctx) {
           return
         }
 
-        const surface = resizeCanvas(canvas, ctx)
+        const surface = resizeCanvas(overlayCanvas, ctx)
         const deltaMs = lastRenderTimeRef.current
           ? frame.now - lastRenderTimeRef.current
           : 16.67
         lastRenderTimeRef.current = frame.now
 
-        drawFrame(
+        const output = drawFrame(
           ctx,
           surface,
           frame,
           trailsRef.current,
           particlesRef.current,
-          isLiquidStyle(frame.visualStyle) ? getLiquidRenderer(liquidRef) : liquidRef.current,
+          isLiquidStyle(frame.visualStyle) && liquidCanvas
+            ? getLiquidRenderer(liquidRef, liquidCanvas)
+            : liquidRef.current,
+          liquidCanvas,
           deltaMs,
           lastVisualGestureRef.current,
           burstTimingRef.current,
         )
+        lastRenderOutputRef.current = output
+
+        if (captureActiveRef.current) {
+          composeCaptureCanvas(
+            getCaptureCanvas(captureCanvasRef),
+            overlayCanvas,
+            liquidCanvas,
+            surface,
+            output,
+          )
+        }
+
         lastVisualGestureRef.current = frame.gesture.visualGesture
       },
       reset() {
@@ -103,33 +129,72 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(
         lastRenderTimeRef.current = 0
         lastVisualGestureRef.current = 'none'
         burstTimingRef.current = { pinchAt: -Infinity, gestureAt: -Infinity }
+        lastRenderOutputRef.current = null
+        setLiquidCanvasVisible(liquidCanvasRef.current, null, false)
 
-        const canvas = canvasRef.current
-        const ctx = canvas?.getContext('2d')
+        const overlayCanvas = overlayCanvasRef.current
+        const ctx = overlayCanvas?.getContext('2d')
 
-        if (canvas && ctx) {
-          const surface = resizeCanvas(canvas, ctx)
+        if (overlayCanvas && ctx) {
+          const surface = resizeCanvas(overlayCanvas, ctx)
           drawIdleFrame(ctx, surface)
+
+          if (captureActiveRef.current) {
+            composeCaptureCanvas(
+              getCaptureCanvas(captureCanvasRef),
+              overlayCanvas,
+              liquidCanvasRef.current,
+              surface,
+              { videoRect: surface, liquidActive: false },
+            )
+          }
         }
       },
       getCanvas() {
-        return canvasRef.current
+        const overlayCanvas = overlayCanvasRef.current
+
+        if (!overlayCanvas) {
+          return null
+        }
+
+        const captureCanvas = getCaptureCanvas(captureCanvasRef)
+        captureActiveRef.current = true
+        composeCaptureCanvas(
+          captureCanvas,
+          overlayCanvas,
+          liquidCanvasRef.current,
+          getCanvasSurface(overlayCanvas),
+          lastRenderOutputRef.current ?? {
+            videoRect: getCanvasSurface(overlayCanvas),
+            liquidActive: false,
+          },
+        )
+
+        return captureCanvas
+      },
+      releaseCapture() {
+        captureActiveRef.current = false
       },
     }))
 
     useEffect(() => {
-      const canvas = canvasRef.current
-      const ctx = canvas?.getContext('2d')
+      const overlayCanvas = overlayCanvasRef.current
+      const ctx = overlayCanvas?.getContext('2d')
 
-      if (!canvas || !ctx) {
+      if (!overlayCanvas || !ctx) {
         return
       }
 
-      const surface = resizeCanvas(canvas, ctx)
+      const surface = resizeCanvas(overlayCanvas, ctx)
       drawIdleFrame(ctx, surface)
     }, [])
 
-    return <canvas ref={canvasRef} className={className} aria-label="Gesture stage canvas" />
+    return (
+      <div className={className} aria-label="Gesture stage canvas">
+        <canvas ref={liquidCanvasRef} className="stage-liquid-canvas" aria-hidden="true" />
+        <canvas ref={overlayCanvasRef} className="stage-overlay-canvas" />
+      </div>
+    )
   },
 )
 
@@ -142,10 +207,11 @@ function drawFrame(
   trails: TrailSystem,
   particles: ParticleSystem,
   liquidRenderer: LiquidRealityRenderer | null,
+  liquidCanvas: HTMLCanvasElement | null,
   deltaMs: number,
   previousVisualGesture: VisualGesture,
   burstTiming: BurstTiming,
-) {
+): RenderOutput {
   const emotion = frame.emotion ?? createDefaultEmotion()
   const videoRect = containRect(
     surface.width,
@@ -162,7 +228,7 @@ function drawFrame(
   const particleControls = frame.particleControls ?? DEFAULT_PARTICLE_CONTROLS
 
   drawBackground(ctx, surface, frame.audio, emotion, frame.now)
-  drawVideoLayer(ctx, frame, videoRect, liquidRenderer)
+  const liquidActive = drawVideoLayer(ctx, frame, videoRect, liquidRenderer, liquidCanvas)
   drawStageWash(ctx, videoRect, frame.audio, emotion, frame.now)
   drawStyleOverlay(ctx, videoRect, frame.visualStyle, focusPoint, frame.audio, emotion, frame.now)
   drawTopologyNetwork(ctx, videoRect, frame.gesture.topology, emotion, frame.mirrored ?? true)
@@ -248,6 +314,8 @@ function drawFrame(
     frame.mirrored ?? true,
   )
   drawCameraPreview(ctx, surface, frame.video, frame.hands, frame.mirrored ?? true)
+
+  return { videoRect, liquidActive }
 }
 
 function drawVideoLayer(
@@ -255,11 +323,13 @@ function drawVideoLayer(
   frame: StageFrame,
   videoRect: CanvasRect,
   liquidRenderer: LiquidRealityRenderer | null,
+  liquidCanvas: HTMLCanvasElement | null,
 ) {
   const mirrored = frame.mirrored ?? true
 
   if (
     liquidRenderer &&
+    liquidCanvas &&
     isLiquidStyle(frame.visualStyle) &&
     frame.liquidControls?.enabled !== false
   ) {
@@ -282,20 +352,24 @@ function drawVideoLayer(
     })
 
     if (rendered) {
-      ctx.drawImage(rendered, videoRect.x, videoRect.y, videoRect.width, videoRect.height)
-      return
+      setLiquidCanvasVisible(liquidCanvas, videoRect, true)
+      ctx.clearRect(videoRect.x - 1, videoRect.y - 1, videoRect.width + 2, videoRect.height + 2)
+      return true
     }
 
     const error = liquidRenderer.getError()
 
     if (error) {
+      setLiquidCanvasVisible(liquidCanvas, null, false)
       drawStyledVideo(ctx, frame.video, videoRect, 'normal', frame.audio.bass, mirrored)
       drawWebglError(ctx, videoRect, error)
-      return
+      return false
     }
   }
 
+  setLiquidCanvasVisible(liquidCanvas, null, false)
   drawStyledVideo(ctx, frame.video, videoRect, frame.visualStyle, frame.audio.bass, mirrored)
+  return false
 }
 
 function extractFingerUniforms(hands: HandData[], mirrored: boolean) {
@@ -320,17 +394,99 @@ function extractFingerUniforms(hands: HandData[], mirrored: boolean) {
   return fingers
 }
 
-function getLiquidRenderer(ref: MutableRefObject<LiquidRealityRenderer | null>) {
+function getLiquidRenderer(
+  ref: MutableRefObject<LiquidRealityRenderer | null>,
+  canvas: HTMLCanvasElement,
+) {
   if (ref.current) {
     return ref.current
   }
 
   try {
-    ref.current = new LiquidRealityRenderer()
+    ref.current = new LiquidRealityRenderer(canvas)
     return ref.current
   } catch (error) {
     console.warn('Liquid renderer unavailable.', error)
     return null
+  }
+}
+
+function setLiquidCanvasVisible(
+  canvas: HTMLCanvasElement | null,
+  rect: CanvasRect | null,
+  visible: boolean,
+) {
+  if (!canvas) {
+    return
+  }
+
+  canvas.classList.toggle('active', visible)
+
+  if (!visible || !rect) {
+    return
+  }
+
+  canvas.style.left = `${rect.x}px`
+  canvas.style.top = `${rect.y}px`
+  canvas.style.width = `${rect.width}px`
+  canvas.style.height = `${rect.height}px`
+}
+
+function getCaptureCanvas(ref: MutableRefObject<HTMLCanvasElement | null>) {
+  if (!ref.current) {
+    ref.current = document.createElement('canvas')
+  }
+
+  return ref.current
+}
+
+function composeCaptureCanvas(
+  captureCanvas: HTMLCanvasElement,
+  overlayCanvas: HTMLCanvasElement,
+  liquidCanvas: HTMLCanvasElement | null,
+  surface: CanvasRect,
+  output: RenderOutput,
+) {
+  if (captureCanvas.width !== overlayCanvas.width) {
+    captureCanvas.width = overlayCanvas.width
+  }
+
+  if (captureCanvas.height !== overlayCanvas.height) {
+    captureCanvas.height = overlayCanvas.height
+  }
+
+  const ctx = captureCanvas.getContext('2d')
+
+  if (!ctx) {
+    return
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, captureCanvas.width, captureCanvas.height)
+
+  if (output.liquidActive && liquidCanvas) {
+    const scaleX = captureCanvas.width / Math.max(1, surface.width)
+    const scaleY = captureCanvas.height / Math.max(1, surface.height)
+    ctx.drawImage(
+      liquidCanvas,
+      output.videoRect.x * scaleX,
+      output.videoRect.y * scaleY,
+      output.videoRect.width * scaleX,
+      output.videoRect.height * scaleY,
+    )
+  }
+
+  ctx.drawImage(overlayCanvas, 0, 0)
+}
+
+function getCanvasSurface(canvas: HTMLCanvasElement): CanvasRect {
+  const bounds = canvas.getBoundingClientRect()
+
+  return {
+    x: 0,
+    y: 0,
+    width: Math.max(1, bounds.width),
+    height: Math.max(1, bounds.height),
   }
 }
 

@@ -32,6 +32,7 @@ type ControlPanelProps = {
   harmonyControls: HarmonyControls
   liquidControls: LiquidControls
   particleControls: ParticleControls
+  faceIntentEnabled: boolean
   debug: DebugMetrics
   emotion: AudioEmotion
   onStart: () => void
@@ -41,6 +42,7 @@ type ControlPanelProps = {
   onSynthVolumeChange: (volume: number) => void
   onHarmonyControlsChange: (controls: HarmonyControls) => void
   onLiquidControlsChange: (controls: LiquidControls) => void
+  onFaceIntentEnabledChange: (enabled: boolean) => void
   onParticleControlsChange: (controls: ParticleControls) => void
 }
 
@@ -62,6 +64,7 @@ export function ControlPanel({
   harmonyControls,
   liquidControls,
   particleControls,
+  faceIntentEnabled,
   debug,
   emotion,
   onStart,
@@ -71,6 +74,7 @@ export function ControlPanel({
   onSynthVolumeChange,
   onHarmonyControlsChange,
   onLiquidControlsChange,
+  onFaceIntentEnabledChange,
   onParticleControlsChange,
 }: ControlPanelProps) {
   const starting = status === 'starting'
@@ -129,6 +133,22 @@ export function ControlPanel({
           {CAMERA_QUALITY_PRESETS[cameraQuality].width}×
           {CAMERA_QUALITY_PRESETS[cameraQuality].height} @{' '}
           {CAMERA_QUALITY_PRESETS[cameraQuality].frameRate}fps
+        </p>
+        <label
+          className={running || starting ? 'toggle-field disabled' : 'toggle-field'}
+          title={running || starting ? '停止实时模式后可切换听/喊语义' : undefined}
+        >
+          <input
+            type="checkbox"
+            checked={faceIntentEnabled}
+            disabled={running || starting}
+            onChange={(event) => onFaceIntentEnabledChange(event.currentTarget.checked)}
+          />
+          <span>听/喊语义</span>
+          <b>{faceIntentEnabled ? 'On' : 'Off'}</b>
+        </label>
+        <p className="meta-line">
+          默认关闭五官锚点以降低 live 延迟；开启后需重新启动实时模式。
         </p>
       </section>
 

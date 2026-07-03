@@ -3,10 +3,13 @@ import { createDefaultEmotion, inferAudioEmotion } from '../audio/audioEmotion'
 import { TopologySynthEngine } from '../audio/synthEngine'
 import {
   DEFAULT_CAMERA_QUALITY,
+  DEBUG_UPDATE_INTERVAL_MS,
+  FACE_DETECT_INTERVAL_MS,
   DEFAULT_HARMONY_CONTROLS,
   DEFAULT_LIQUID_CONTROLS,
   DEFAULT_PARTICLE_CONTROLS,
   EMPTY_AUDIO_FEATURES,
+  HAND_DETECT_INTERVAL_MS,
   HARMONY_FAMILY_LABELS,
 } from '../core/config'
 import type {
@@ -78,6 +81,7 @@ export function RealtimeMode() {
   const lastPlayableHarmonyRef = useRef<HarmonyState | null>(null)
   const liquidControlsRef = useRef<LiquidControls>(DEFAULT_LIQUID_CONTROLS)
   const particleControlsRef = useRef<ParticleControls>(DEFAULT_PARTICLE_CONTROLS)
+  const faceIntentEnabledRef = useRef(false)
   const emotionRef = useRef<AudioEmotion>(createDefaultEmotion())
   const gestureEngineRef = useRef(new GestureEngine())
   const debugTickRef = useRef({ lastUpdate: 0, lastFpsTime: 0, frames: 0, fps: 0 })
@@ -101,6 +105,7 @@ export function RealtimeMode() {
   const [particleControls, setParticleControls] = useState<ParticleControls>(
     DEFAULT_PARTICLE_CONTROLS,
   )
+  const [faceIntentEnabled, setFaceIntentEnabled] = useState(false)
   const [emotion, setEmotion] = useState<AudioEmotion>(createDefaultEmotion())
   const [debug, setDebug] = useState<DebugMetrics>(initialDebug)
 
@@ -128,6 +133,10 @@ export function RealtimeMode() {
   useEffect(() => {
     particleControlsRef.current = particleControls
   }, [particleControls])
+
+  useEffect(() => {
+    faceIntentEnabledRef.current = faceIntentEnabled
+  }, [faceIntentEnabled])
 
   const handleVisualStyleChange = useCallback((nextStyle: VisualStyle) => {
     setVisualStyle(nextStyle)
@@ -205,7 +214,7 @@ export function RealtimeMode() {
         fpsState.lastFpsTime = now
       }
 
-      if (now - fpsState.lastUpdate < 120) {
+      if (now - fpsState.lastUpdate < DEBUG_UPDATE_INTERVAL_MS) {
         return
       }
 
@@ -260,7 +269,7 @@ export function RealtimeMode() {
         video &&
         tracker &&
         video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-        now - visionTickRef.current.lastDetect >= 41
+        now - visionTickRef.current.lastDetect >= HAND_DETECT_INTERVAL_MS
       ) {
         try {
           visionTickRef.current.hands = tracker.detect(video, now)
@@ -277,8 +286,9 @@ export function RealtimeMode() {
       if (
         video &&
         faceTracker &&
+        faceIntentEnabledRef.current &&
         video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-        now - faceTickRef.current.lastDetect >= 100
+        now - faceTickRef.current.lastDetect >= FACE_DETECT_INTERVAL_MS
       ) {
         try {
           faceTickRef.current.face = faceTracker.detect(video, now)
@@ -297,7 +307,9 @@ export function RealtimeMode() {
       const face = faceTickRef.current.face
       const targetHand = selectTargetHand(hands)
       const gesture = video ? gestureEngineRef.current.update(targetHand, now, hands) : emptyGestureSnapshot()
-      const faceIntent = analyzeFaceIntent(hands, face)
+      const faceIntent = faceIntentEnabledRef.current
+        ? analyzeFaceIntent(hands, face)
+        : { kind: 'none' as const, intensity: 0, anchor: null }
       faceIntentRef.current = faceIntent
       const playback = resolvePlaybackHarmony(
         gesture.harmony,
@@ -365,13 +377,16 @@ export function RealtimeMode() {
 
       setMessage('正在加载手部识别')
       const tracker = await HandTracker.create()
-      setMessage('正在加载五官锚点')
       let faceTracker: FaceTracker | null = null
 
-      try {
-        faceTracker = await FaceTracker.create()
-      } catch (error) {
-        console.warn('Face tracker unavailable; continuing without face anchors.', error)
+      if (faceIntentEnabledRef.current) {
+        setMessage('正在加载五官锚点')
+
+        try {
+          faceTracker = await FaceTracker.create()
+        } catch (error) {
+          console.warn('Face tracker unavailable; continuing without face anchors.', error)
+        }
       }
 
       let audioAnalyser: MicAudioAnalyser | null = null
@@ -447,6 +462,7 @@ export function RealtimeMode() {
         synthVolume={synthVolume}
         harmonyControls={harmonyControls}
         liquidControls={liquidControls}
+        faceIntentEnabled={faceIntentEnabled}
         debug={debug}
         emotion={emotion}
         particleControls={particleControls}
@@ -457,6 +473,7 @@ export function RealtimeMode() {
         onSynthVolumeChange={setSynthVolume}
         onHarmonyControlsChange={setHarmonyControls}
         onLiquidControlsChange={setLiquidControls}
+        onFaceIntentEnabledChange={setFaceIntentEnabled}
         onParticleControlsChange={setParticleControls}
       />
     </main>
